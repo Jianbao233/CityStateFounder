@@ -1,48 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- ===========================================================================
-     CityStateFounder / 城邦缔造者 —— 【可选】提高城邦数量上限
+     CityStateFounder / 城邦缔造者 —— 提高城邦数量上限（已实机验证）
      ===========================================================================
 
-     ⚠️⚠️ 本文件【默认未注册】。要启用，请在 CityStateFounder.modinfo 的
-          FrontEndActions 里加一条：
-
-              UpdateDatabase id="CSF_MapSizes_XML"
-                File: Data/CSF_MapSizes.xml
-
-          并把原来那条指向 Data/CSF_MapSizes.sql 的 CSF_MapSizes 去掉
-          （SQL 版是空操作，两者做的是同一件事）。
+     ✅ 2026-09-27 实机验证通过：加载后活库里的 StandardMapSizes 确实变成
+        决斗 10 / 极小 14 / 小 18 / 标准 22 / 大 26 / 巨大 28（官方是 6/10/14/18/22/24），
+        而 DefaultCityStates 保持官方原值（3/6/9/12/15/18）不变。
 
      ===========================================================================
-     为什么用 XML 而不是 SQL（T-148 实测）
+     ⭐⭐ 三个必须同时满足的条件（少一个就不生效）—— 都是实测踩出来的
      ===========================================================================
-     我们的 SQL 写法（UPDATE MapSizes SET MaxCityStates 等于某值）完全不生效：
-       · Modding.log 显示文件确实被加载了
-         （ModdingUpdateConfigurationDatabase Loading Data/CSF_MapSizes.sql）
-       · 但活库里毫无变化，连【去掉 WHERE、改所有行】都没用
-       · 放 FrontEndActions / InGameActions 都一样；有无 LoadOrder 都一样；
-         有无结尾的 SELECT 1; 都一样
+     ① 必须用 XML 的 Replace，不能用 SQL 的 UPDATE
+        实测：`UPDATE MapSizes SET MaxCityStates = ...` 完全不生效。
+        证据：Modding.log 显示文件确实被加载
+        （ModdingUpdateConfigurationDatabase Loading Data/CSF_MapSizes.sql），
+        但活库毫无变化，连【去掉 WHERE、改所有行】都没用；
+        放 FrontEndActions 或 InGameActions、有无 LoadOrder、有无结尾 SELECT，
+        全都不影响结果。
 
-     而 BBM（Better Balanced Maps，工坊 3179425402）用下面这种 XML Replace
-     写的 StandardMapSizes 行确实出现在活库里。
+     ② 必须给一个【很高的 LoadOrder】
+        实测：BBM（Better Balanced Maps，工坊 3179425402）的 Configuration/Config.xml
+        里也有 StandardMapSizes 的 Replace（用的是官方原值）。
+        默认顺序下它在【我们之后】加载（序列 135/196 vs 我们 107/196），
+        于是把我们的改动覆盖回原值。
+        加上 LoadOrder 999999 后我们排到最后（196/196），改动才保住。
+        ⚠️ 若你还装了别的改 MapSizes 的 mod，可能需要比 999999 更高。
 
-     → **配置库（Configuration）的改动必须走 XML 行操作，SQL UPDATE 不生效。**
-
-     ⚠️ Replace 是【整行替换】，**所有列都必须给全**，漏掉的列会变成 NULL。
-        所以下面每行都照抄官方 Base/Assets/Configuration/Data/MapSizes.xml
-        的每一列，只改动想改的那一列。
-
-     ⚠️ 另注：XML 注释里不能出现连续两个连字符（这是 XML 规范），
-        所以本注释刻意不引用任何带那种符号的代码片段。
+     ③ Replace 是【整行替换】，11 列必须给全，漏掉的列会变成 NULL
+        列清单（见 Base/Assets/Configuration/Data/Schema/AdditionalTables.sql:144）：
+        Domain / MapSizeType / Name / Description / MinPlayers / MaxPlayers /
+        DefaultPlayers / MinCityStates / MaxCityStates / DefaultCityStates / SortIndex
+        主键是 (Domain, MapSizeType)。
+        （官方 MapSizes.xml 的 Row 不写 Domain，因为该列默认就是 StandardMapSizes。）
 
      ===========================================================================
      本文件改了什么
      ===========================================================================
      只提高 MaxCityStates（开局设置里城邦数量滑条的【上限】），
-     DefaultCityStates 保持官方原值不动，这样：
+     MinCityStates 与 DefaultCityStates 都保持官方原值，于是：
 
-       · 开局设置界面的【布局与默认值完全不变】
+       · 开局设置界面的布局与默认值完全不变
        · 只是滑条能拉到更高（可选项变多）
-       · 想要更多休眠城邦的玩家自己往上拉；不拉就还是原版体验
+       · 想多要休眠城邦的玩家自己往上拉；不拉就还是原版体验
 
      地图       官方 Max   本文件 Max   官方 Default（不动）
      决斗            6          10            3
@@ -53,7 +52,7 @@
      巨大           24          28           18
 
      ===========================================================================
-     ⚠️ 启用前必读：地图容量
+     ⚠️ 与 CCB Maps 同用时的注意事项
      ===========================================================================
      城邦数量不能超过地图能提供的出生点。超过时：
        · 官方地图脚本会优雅跳过（打印 START FAILED MINOR 警告），不会崩
@@ -62,8 +61,10 @@
          位置见 BBM_AssignStartingPlots.lua 第 349 到 353 行。
          官方 AssignStartingPlots.lua 第 216 行则是有上限的循环，并打印警告。
 
-     → 和 CCB Maps 一起用时务必从小幅开始实测（例如先只给标准图加 2）。
-       下面给的加 4 是保守值，不是保证值。
+     ⚠️ 实测状态：本文件加载后【地图生成正常、CCB Maps 正常】
+        （BBS_AssignTries = 5，BBS_Success = true）。
+        但 headless 测试局固定只用 9 个城邦，所以【滑条拉到上限后的容量问题
+        尚未验证】—— 建议先小幅提高（例如标准图先只 +2）再逐步加大。
 
      ===========================================================================
      和本模组开关的配合
@@ -81,15 +82,6 @@
      =========================================================================== -->
 <GameInfo>
   <MapSizes>
-
-    <!-- 官方原值（照抄自 Base/Assets/Configuration/Data/MapSizes.xml）
-         DUEL     2/4/2   0/6/3   10
-         TINY     2/6/4   0/10/6  20
-         SMALL    2/10/6  0/14/9  30
-         STANDARD 2/14/8  0/18/12 40
-         LARGE    2/16/10 0/22/15 50
-         HUGE     2/20/12 0/24/18 60
-         下面只把 MaxCityStates 抬高，其余列原样照抄 -->
 
     <Replace Domain="StandardMapSizes" MapSizeType="MAPSIZE_DUEL"
              Name="LOC_MAPSIZE_DUEL_NAME" Description="LOC_MAPSIZE_DUEL_DESCRIPTION"

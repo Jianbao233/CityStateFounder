@@ -40,24 +40,26 @@
     <UpdateText id="CSF_Text_FE">
       <File>Text/CSF_Text.xml</File>
     </UpdateText>
-    <!-- ⚠️ 必须用【直接 File 子元素】，不能包在 Items 里（T-148）。
-         Items 是 ImportFiles / AddUserInterfaces 那类动作的写法；
-         知识库 knowledge/modinfo/action-patterns.md 的示例也是直接 File。
-         注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。
-
-         ⚠️⚠️ 但即使写法正确，本机实测这个动作【仍然不执行】——
-            · 把 DUEL 的 MaxCityStates 设成 999，活库里依然是 6（无论放
-              FrontEndActions 还是 InGameActions，也无论有没有 SELECT 1;）
-            · Database.log 里该文件零出现，反而出现
-                [Configuration] ERROR: database schema is locked: main
-                [Configuration] ERROR: Failed to Backup Database.
-              → **本机的配置库处于异常状态，模组对配置库的写入静默失败**
-              （旁证：BBM 新增的 ExtraStandardMapSizes 域确实出现在活库里，
-                说明机制本身是通的，只是本机环境有问题）
-         所以 CSF_MapSizes.sql 目前保持【不修改任何值】，避免留下"以为改了其实没改"的假象。
-         真要放开提高城邦数量，请先确认配置库恢复正常（见该 sql 文件里的步骤）。 -->
+    <!-- ⭐⭐ MapSizes：提高城邦数量上限（已实机验证 2026-09-27）
+         三个必须同时满足的条件，缺一个就不生效（都是实测踩出来的）：
+           ① 必须用 XML 的 Replace，SQL 的 UPDATE 对配置库【完全无效】
+           ② 必须给【很高的 LoadOrder】—— 否则会被别的 mod 覆盖回原值。
+              实测 BBM（3179425402）的 Configuration/Config.xml 里也有
+              StandardMapSizes 的 Replace（官方原值），默认顺序下它在
+              我们之后加载（序列 135/196 vs 我们 107/196），会把改动抹掉。
+              加上 999999 后我们排到最后（196/196），改动才保住。
+           ③ Replace 是【整行替换】，11 列必须给全，漏列会变 NULL。
+         验证结果：活库里 StandardMapSizes 的上限确实变成
+           决斗 10 / 极小 14 / 小 18 / 标准 22 / 大 26 / 巨大 28，
+         而 DefaultCityStates 保持官方原值（3/6/9/12/15/18）不变
+         —— 所以开局设置界面的布局与默认值完全不变，只是滑条能拉更高。
+         详细说明与注意事项见 Data/CSF_MapSizes.xml 内的注释。
+         注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。 -->
     <UpdateDatabase id="CSF_MapSizes">
-      <File>Data/CSF_MapSizes.sql</File>
+      <Properties>
+        <LoadOrder>999999</LoadOrder>
+      </Properties>
+      <File>Data/CSF_MapSizes.xml</File>
     </UpdateDatabase>
     <!-- ⭐ 单位图标（复用开拓者的图）—— 照官方 Australia.modinfo:36 的写法 -->
     <UpdateIcons id="CSF_Icons_FE">
