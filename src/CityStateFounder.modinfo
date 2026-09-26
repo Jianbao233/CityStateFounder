@@ -48,6 +48,10 @@
     <UpdateText id="CSF_Text_FE">
       <File>Text/CSF_Text.xml</File>
     </UpdateText>
+    <!-- ⭐ 单位图标（复用开拓者的图）—— 照官方 Australia.modinfo:36 的写法 -->
+    <UpdateIcons id="CSF_Icons_FE">
+      <File>Data/CSF_Icons.xml</File>
+    </UpdateIcons>
   </FrontEndActions>
 
   <InGameActions>
@@ -58,6 +62,12 @@
     <UpdateText id="CSF_Text_IG" criteria="CSF_XP2">
       <File>Text/CSF_Text.xml</File>
     </UpdateText>
+
+    <!-- ⭐ 单位图标（复用开拓者的图）—— 必须同时注册在 InGame，
+         否则游戏内建造列表 / 单位面板 / 地图旗帜都取不到图标 -->
+    <UpdateIcons id="CSF_Icons_IG" criteria="CSF_XP2">
+      <File>Data/CSF_Icons.xml</File>
+    </UpdateIcons>
 
     <AddGameplayScripts id="CSF_Gameplay">
       <File>Lua/CSF_Gameplay.lua</File>
@@ -100,6 +110,7 @@
   </InGameActions>
 
   <Files>
+    <File>Data/CSF_Icons.xml</File>
     <File>Data/CSF_MapSizes.sql</File>
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CityStateFounder / 城邦缔造者 — 单位图标定义
+  区段：UpdateIcons（FrontEnd + InGame）
+
+  ⭐ 「建邦使节」的图标【全部复用开拓者的图】（用户要求 T-141）。
+
+  为什么必须显式定义：
+    引擎按【命名约定】找单位图标 —— `ICON_` + 单位类型名，例如
+      UNIT_CSF_ENVOY  →  ICON_UNIT_CSF_ENVOY
+                      →  ICON_UNIT_CSF_ENVOY_FOW / _WHITE / _BLACK
+                      →  ICON_UNIT_CSF_ENVOY_PORTRAIT（+ 时代变体）
+    一个都没定义，就会在 Lua.log 里刷
+      `WorldTracker: UIWARNING: Could not find icon for ICON_UNIT_CSF_ENVOY`
+    并且界面上显示空白图标。
+
+  开拓者的完整图标清单（本文件逐条镜像，只改名字、Atlas/Index 原样照抄）：
+    Base/Assets/UI/Icons/Icons_Units.xml:13         ICON_UNIT_SETTLER                       ICON_ATLAS_UNITS                0
+    Base/Assets/UI/Icons/Icons_Units.xml:114        ICON_UNIT_SETTLER_FOW                   ICON_ATLAS_UNITS_FOW            0
+    Base/Assets/UI/Icons/Icons_UnitFlags.xml:13     ICON_UNIT_SETTLER_WHITE                 ICON_ATLAS_UNIT_FLAG_SYMBOLS_WHITE  0
+    Base/Assets/UI/Icons/Icons_UnitFlags.xml:14     ICON_UNIT_SETTLER_BLACK                 ICON_ATLAS_UNIT_FLAG_SYMBOLS_BLACK  0
+    Base/Assets/UI/Icons/Icons_UnitPortraits.xml:58 ICON_UNIT_SETTLER_PORTRAIT              ICON_ATLAS_UNIT_PORTRAITS       0
+    Base/Assets/UI/Icons/Icons_UnitPortraits.xml:569 ICON_UNIT_SETTLER_PORTRAIT_ERA_MODERN  ICON_ATLAS_UNIT_PORTRAITS_2     37
+    Base/Assets/UI/Icons/Icons_UnitPortraits.xml:729-730  ATOMIC / INFORMATION 用 OtherName 指向 MODERN
+
+  注册方式（照官方 Australia.modinfo:36）：
+    <UpdateIcons id="..."><File>Data/CSF_Icons.xml</File></UpdateIcons>
+-->
+<GameInfo>
+  <IconDefinitions>
+
+    <!-- ① 建造列表 / 单位面板 / 地图追踪器用的小图标 -->
+    <Row Name="ICON_UNIT_CSF_ENVOY"
+         Atlas="ICON_ATLAS_UNITS" Index="0"/>
+
+    <!-- ② 战争迷雾下的图标（未探明区域） -->
+    <Row Name="ICON_UNIT_CSF_ENVOY_FOW"
+         Atlas="ICON_ATLAS_UNITS_FOW" Index="0"/>
+
+    <!-- ③ 单位旗帜（地图上那个小圆旗）的白 / 黑两版 -->
+    <Row Name="ICON_UNIT_CSF_ENVOY_WHITE"
+         Atlas="ICON_ATLAS_UNIT_FLAG_SYMBOLS_WHITE" Index="0"/>
+    <Row Name="ICON_UNIT_CSF_ENVOY_BLACK"
+         Atlas="ICON_ATLAS_UNIT_FLAG_SYMBOLS_BLACK" Index="0"/>
+
+    <!-- ④ 单位面板里的大立绘（按时代切换，与原版一致） -->
+    <Row Name="ICON_UNIT_CSF_ENVOY_PORTRAIT"
+         Atlas="ICON_ATLAS_UNIT_PORTRAITS" Index="0"/>
+    <Row Name="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_MODERN"
+         Atlas="ICON_ATLAS_UNIT_PORTRAITS_2" Index="37"/>
+    <Row Name="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_ATOMIC"
+         OtherName="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_MODERN"/>
+    <Row Name="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_INFORMATION"
+         OtherName="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_MODERN"/>
+
+  </IconDefinitions>
+</GameInfo>

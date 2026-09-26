@@ -593,23 +593,76 @@ end
 --      Events.LoadScreenClose  —— 读档/开局完成，赶在第 1 回合处理之前
 --      Events.UnitAddedToMap   —— 单位上地图时拦截（防止预留城邦的单位溜回地图）
 -- ---------------------------------------------------------------------------
--- 【预留几个城邦】——决定玩家能选到多少个城邦
---   语义：开局时把本局【还没建城】的城邦里，取这么多个"送下地图"保持休眠。
---         它们就是面板里真正可用的那批（可被玩家逐个放上地图）。
+-- 【地图上保留几座城邦】—— 决定世界看起来有多"正常"
+--   语义：开局时本局有 T 个城邦玩家（T 由【开局设置】决定）。
+--         其中 **CSF_KEEP_ACTIVE_ON_MAP 个正常留在地图上、照常建城**；
+--         其余的（T − 这个数）全部送下地图保持休眠，供玩家用建邦使节放置。
 --
---   ⭐ 默认 -1 = 【全部预留】（能藏多少藏多少）。
---      理由：本局城邦总数由【开局设置】决定（MapSizes.xml 的 MaxCityStates）：
---         Duel 最多 6 / Tiny 10 / Small 14 / Standard 18 / Large 22 / **Huge 24**
---      预留越多，玩家可选的城邦就越多。这正是"想要更多城邦"的正确杠杆。
+--   ⭐ 默认 6：保证地图上始终有城邦可以互动（能派使者、能争宗主），
+--      同时留出一批给玩家自己放。
 --
 --   取值：
---     -1  = 全部预留（**默认**）——面板里本局所有城邦都能选
---      0  = 不预留（纯原版行为）
---      N  = 最多预留 N 个
+--     -1  = 全部留在地图上（= 纯原版行为，面板里没有可建的城邦）
+--      0  = 全部藏起来（⚠️ 地图上一座城邦都没有 —— 世界会很空，不推荐）
+--      N  = 留 N 座在地图上；其余（T − N）可建
 --
---   ⚠️ 取舍：预留的城邦**开局不会自行建城**（保持休眠），
---      所以地图上的活跃城邦会变少 —— 这些城邦是留给玩家"亲手放上去"的。
-local CSF_RESERVED_COUNT = -1;
+--   ⚠️⚠️ 本局城邦总数 T 的上限（官方 MapSizes.xml 的 MaxCityStates）：
+--         Duel 6 / Tiny 10 / Small 14 / Standard 18 / Large 22 / Huge 24
+--       所以"可建数量 = T − N"。**想同时要"地图上城邦多"和"可建数量多"，
+--       唯一的办法是提高 T —— 也就是在开局设置里把城邦数量调高**
+--       （见 Data/CSF_MapSizes.sql，那里记录了我们为什么不自动改 T）。
+local CSF_KEEP_ACTIVE_ON_MAP = 6;
+
+-- ---------------------------------------------------------------------------
+-- 【额外休眠城邦】—— 开局"凭空"多造几个城邦玩家，让玩家有更多可选（T-144）
+-- ---------------------------------------------------------------------------
+--   ⛔⛔⛔ 【本方案已实测否决 —— 不要打开】⛔⛔⛔
+--
+--   目标（用户要求）：
+--     · 开局设置界面【完全不变】
+--     · 地图上【和原版一样】，正常生成开局前决定好的数量
+--     · 但面板里可选的城邦【更多】
+--
+--   做法（已实现并实测）：LoadScreenClose 时用 AddPlayer 造 N 个【本局没有的】
+--     城邦玩家，造完立刻送下地图休眠。它们从不上地图，所以地图看起来和原版一样。
+--
+--   ✅ 实测成功的部分（2026-09-26 独立复现）：
+--     · 创建稳定（两次独立开局都拿到槽 54–57，文明/领袖正确）
+--     · 真的是休眠（cities=0 onMap=0 alive=true）、真的没上地图
+--     · 面板可建数 3 → 7（原生休眠 3 + 额外 4）
+--     · 不会因"缺起始位置"被引擎移除（连续存活 4 分钟以上）
+--     · A/B 对照：关闭/开启各跑 4 分钟心跳，两组都全程存活
+--
+--   ❌ 但这两条致命问题让本方案【不可用】（与 T-115 结论完全一致）：
+--     ① 【没有颜色】`UI.GetPlayerColors(54..57)` 全部返回 nil，而原生城邦
+--        （含资料片的）都返回 -15198184。**颜色是按【玩家槽】解析的**，
+--        AddPlayer 走的不是引擎初始化玩家的路径。
+--        反证：CIVILIZATION_ANTIOCH 在 Expansion1_PlayerColors.xml 里【有】
+--        颜色定义，我们的槽 55 依然 nil → 证明按槽不按文明。
+--        **DLL 里只有 `GetColor`、没有 `SetColor`** → 运行时无法补。
+--     ② 【破坏城邦面板 / 引擎不稳定】T-115 实测：BetterCityStates 在
+--        `CityStates_MPT.lua:374` 崩溃（`GameInfo.DiplomaticStates[diploStateID]`
+--        为 nil）→ **城邦面板整张显示 `$占位符$` 且不可用**。
+--        本次复测也观察到：建一个额外城邦时游戏**挂起**
+--        （Responding=False、FireTuner 端口关闭、CPU 近零增长）。
+--
+--   → **结论：引擎不支持在运行时凭空造出机制完整的城邦玩家。**
+--     要"更多可选城邦"，唯一可行的杠杆是【提高本局城邦总数】
+--     （见 Data/CSF_MapSizes.sql），代价是开局设置界面的滑条会变。
+--
+--   保留本实现的价值：它是一份【已排除方案的可执行记录】。将来若有人想重走
+--   这条路，看这里的结论即可，不必再踩一遍。
+--
+--   取值：
+--     0  = 关闭（**默认，也是唯一推荐值**）
+--     N  = 额外造 N 个（⚠️ 已知缺颜色 + 破坏城邦面板，仅供研究）
+local CSF_EXTRA_DORMANT_COUNT = 0;
+
+-- 额外城邦是否补起始位置（实验用，同样已否决）
+--   ⚠️ 实测把这项打开后，游戏在开局后【立刻死亡】，比不补更糟 ——
+--      SetRandomMinorStartingPosition 用在 AddPlayer 新建的槽上很可能与
+--      已分配的位置冲突。**保持 false。**
+local CSF_EXTRA_SET_START_POS = false;
 
 local m_tReserved = {};          -- 已预留的城邦 playerID 集合
 local m_tOrphan   = {};          -- 【动态创建后建城失败】留下的玩家：Civ -> playerID
@@ -664,15 +717,185 @@ local function CSF_SendPlayerOffMap(iPlayerID)
     return true;
 end
 
+local function CSF_GetLeaderForCiv(sCiv)
+    if sCiv == nil or sCiv == "" then return nil end
+
+    -- ① 遍历匹配（主要途径）
+    local sLeader = nil;
+    pcall(function()
+        for row in GameInfo.CivilizationLeaders() do
+            if row.CivilizationType == sCiv then
+                sLeader = row.LeaderType;
+            end
+        end
+    end);
+    if sLeader ~= nil and sLeader ~= "" then return sLeader end
+
+    -- ② 命名规律 + 存在性验证（兜底）
+    local sGuess = "LEADER_MINOR_CIV_" .. string.gsub(sCiv, "^CIVILIZATION_", "");
+    local kLeader = nil;
+    pcall(function() kLeader = GameInfo.Leaders[sGuess] end);
+    if kLeader ~= nil then return sGuess end
+
+    -- ③ 都不行 → 返回 nil（调用方必须中止，绝不能把 nil 传给引擎）
+    return nil;
+end
+
+-- ===========================================================================
+-- 【额外休眠城邦】开局凭空多造 N 个城邦玩家（T-144，路线 C）
+-- ===========================================================================
+--   时机：LoadScreenClose —— 地图已生成、第 1 回合尚未开始。
+--   目的：地图保持原版外观，但面板里可选的城邦更多。
+--   返回：实际创建成功的个数。
+--
+--   安全性设计（逐条对应已知雷区）：
+--     · 只挑【本局没有的】城邦文明 → 不会造出重复文明
+--     · 领袖必须先查得到（传 nil 给 SetPlayerLeader = 引擎空指针崩溃，T-89）
+--     · 创建后【立刻】送下地图 + 标记预留 → 不会在地图上留下痕迹
+--     · 全程 pcall 包裹 → 任何一步失败都只是少造一个，不会崩
+--     · 默认关闭（CSF_EXTRA_DORMANT_COUNT = 0）
+local function CSF_CreateExtraDormantCityStates()
+    if CSF_EXTRA_DORMANT_COUNT == nil or CSF_EXTRA_DORMANT_COUNT <= 0 then
+        return 0;
+    end
+
+    -- ⛔ 已否决方案的响亮警告（T-144 / T-115）
+    print("[CSF] ⛔⛔ extra: CSF_EXTRA_DORMANT_COUNT = " .. tostring(CSF_EXTRA_DORMANT_COUNT) ..
+          " —— 这是一个【已实测否决】的方案！");
+    print("[CSF] ⛔⛔ extra: 已知后果 = ① 新造的城邦【没有颜色】(UI.GetPlayerColors = nil，");
+    print("[CSF] ⛔⛔ extra:   引擎没有 SetColor API 可补) ② BetterCityStates 会在");
+    print("[CSF] ⛔⛔ extra:   CityStates_MPT.lua:374 崩溃 → 城邦面板显示 $占位符$ 且不可用");
+    print("[CSF] ⛔⛔ extra:   ③ 建邦时游戏可能挂起。详见 CSF_Gameplay.lua 顶部注释与决策记录 T-144。");
+
+    local pm = WorldBuilder and WorldBuilder.PlayerManager and WorldBuilder.PlayerManager() or nil;
+    if pm == nil then
+        print("[CSF] extra: WorldBuilder.PlayerManager 不可用，跳过");
+        return 0;
+    end
+
+    -- ① 本局【已被占用】的城邦文明 —— 不能重复造
+    --    ⚠️⚠️ 必须扫【所有槽位】，不能只看 GetAliveMinorIDs()！
+    --    实测踩到：槽 50–53 是 status=5 的【预分配槽】，它们持有城邦文明
+    --    （如 CIVILIZATION_ANTANANARIVO）但**不在 GetAliveMinorIDs() 里**。
+    --    只查存活列表 → 我们又造了一个同文明的玩家 → **本局出现两个同名文明**。
+    local tUsed = {};
+    local tExisting = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    for _, iPlayer in ipairs(tExisting) do
+        local sCiv = CSF_Safe(function()
+            return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
+        end);
+        if sCiv ~= nil then tUsed[sCiv] = true end
+    end
+    -- 再把所有槽位（含 status=5 预分配槽、主文明、城邦）扫一遍
+    local iSlotScanned = 0;
+    for iSlot = 0, 63 do
+        local sCiv = CSF_Safe(function()
+            return PlayerConfigurations[iSlot]:GetCivilizationTypeName();
+        end);
+        if sCiv ~= nil and sCiv ~= "" then
+            tUsed[sCiv] = true;
+            iSlotScanned = iSlotScanned + 1;
+        end
+    end
+    print("[CSF] extra: 已占用文明 " .. tostring(iSlotScanned) .. " 个（含预分配槽），存活城邦 " ..
+          tostring(#tExisting) .. " 个");
+
+    -- ② 候选：城邦池里【本局没有】的那些（按规则集取 Domain）
+    local sRuleset = CSF_Safe(function() return GameConfiguration.GetValue("RULESET") end);
+    local sDomain = "Expansion2CityStates";
+    if sRuleset == "RULESET_EXPANSION_1" then
+        sDomain = "Expansion1CityStates";
+    elseif sRuleset ~= "RULESET_EXPANSION_2" then
+        sDomain = "StandardCityStates";
+    end
+
+    local tCand = {};
+    local tRows = CSF_Safe(function()
+        return DB.ConfigurationQuery(
+            "SELECT CivilizationType, Name FROM CityStates WHERE Domain = ?", sDomain);
+    end) or {};
+    for _, row in ipairs(tRows) do
+        local sCiv = row.CivilizationType;
+        if sCiv ~= nil and not tUsed[sCiv] then
+            tCand[#tCand + 1] = sCiv;
+        end
+    end
+    print("[CSF] extra: 本局已有 " .. tostring(#tExisting) .. " 个城邦，池里可用的新文明 " ..
+          tostring(#tCand) .. " 个；目标额外造 " .. tostring(CSF_EXTRA_DORMANT_COUNT) .. " 个");
+
+    -- ③ 逐个创建
+    local iMade = 0;
+    for i = 1, CSF_EXTRA_DORMANT_COUNT do
+        local sCiv = tCand[i];
+        if sCiv == nil then
+            print("[CSF] extra: 候选已用尽（只造出 " .. tostring(iMade) .. " 个）");
+            break
+        end
+
+        -- 领袖必须查得到（T-89：传 nil 会崩）
+        local sLeader = CSF_GetLeaderForCiv(sCiv);
+        if sLeader == nil then
+            print("[CSF] extra: " .. tostring(sCiv) .. " 查不到领袖，跳过");
+        else
+            -- ③a AddPlayer 拿一个槽
+            local iNew = nil;
+            local bAdd = pcall(function() iNew = pm:AddPlayer(true) end);
+            if (not bAdd) or iNew == nil then
+                print("[CSF] extra: AddPlayer 失败（空槽用尽？）—— 已造 " .. tostring(iMade) .. " 个，停止");
+                break
+            end
+
+            -- ③b 定文明/领袖/等级（顺序关键：T-111）
+            local bLead = pcall(function()
+                pm:SetPlayerLeader(iNew, sLeader, sCiv, "CIVILIZATION_LEVEL_CITY_STATE");
+            end);
+            if not bLead then
+                print("[CSF] extra: SetPlayerLeader(" .. tostring(iNew) .. ", " .. tostring(sCiv) ..
+                      ") 失败 —— 停止（避免留下半成品玩家）");
+                break
+            end
+
+            -- ③c 起始位置（默认不补 —— 补了就可能真的上地图）
+            if CSF_EXTRA_SET_START_POS then
+                local bPos = pcall(function() pm:SetRandomMinorStartingPosition(iNew) end);
+                print("[CSF] extra: SetRandomMinorStartingPosition(" .. tostring(iNew) ..
+                      ") ok=" .. tostring(bPos));
+            end
+
+            -- ③d 立刻送下地图 + 标记预留（这样它永远不会在地图上出现）
+            local bOff = CSF_SendPlayerOffMap(iNew);
+            if bOff then m_tReserved[iNew] = true end
+
+            iMade = iMade + 1;
+            print("[CSF] extra: ✅ 创建城邦玩家 " .. tostring(iNew) .. " = " .. tostring(sCiv) ..
+                  " (leader=" .. tostring(sLeader) .. ")  offmap=" .. tostring(bOff));
+        end
+    end
+
+    print("[CSF] extra done: 额外创建 " .. tostring(iMade) .. " 个休眠城邦");
+    return iMade;
+end
+
 -- 开局/读档完成后执行预留
---   CSF_RESERVED_COUNT == -1 表示【全部预留】（能藏多少藏多少）
+--   预留数 = 本局城邦总数 − CSF_KEEP_ACTIVE_ON_MAP
+--     CSF_KEEP_ACTIVE_ON_MAP == -1 → 一个都不藏（纯原版）
+--     CSF_KEEP_ACTIVE_ON_MAP ==  0 → 全部藏起来
 local function CSF_ReserveCityStates()
     local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    local iTotal = #tIDs;
     local iDone = 0;
-    local bAll = (CSF_RESERVED_COUNT == nil or CSF_RESERVED_COUNT < 0);
+
+    -- 要藏几个 = 总数 − 地图上保留数（保留数为 -1 时表示全留，即藏 0 个）
+    local iWantReserve;
+    if CSF_KEEP_ACTIVE_ON_MAP == nil or CSF_KEEP_ACTIVE_ON_MAP < 0 then
+        iWantReserve = 0;
+    else
+        iWantReserve = iTotal - CSF_KEEP_ACTIVE_ON_MAP;
+        if iWantReserve < 0 then iWantReserve = 0 end
+    end
 
     for _, iPlayer in ipairs(tIDs) do
-        if (not bAll) and iDone >= CSF_RESERVED_COUNT then break end
+        if iDone >= iWantReserve then break end
 
         -- 已经是预留的就跳过
         if not CSF_IsReserved(iPlayer) then
@@ -690,16 +913,21 @@ local function CSF_ReserveCityStates()
         end
     end
 
-    print("[CSF] reserve done: " .. tostring(iDone) .. " / " .. tostring(#tIDs) ..
-          " city-state(s) reserved (target " ..
-          (bAll and "ALL" or tostring(CSF_RESERVED_COUNT)) .. ") —— " ..
-          "这 " .. tostring(iDone) .. " 个就是面板里可用（可放上地图）的城邦");
+    print("[CSF] reserve done: " .. tostring(iDone) .. " / " .. tostring(iTotal) ..
+          " city-state(s) hidden  —— 地图上保留 " .. tostring(iTotal - iDone) ..
+          " 座（目标 " ..
+          ((CSF_KEEP_ACTIVE_ON_MAP == nil or CSF_KEEP_ACTIVE_ON_MAP < 0)
+            and "ALL" or tostring(CSF_KEEP_ACTIVE_ON_MAP)) .. "），" ..
+          "可建 " .. tostring(iDone) .. " 座");
     return iDone;
 end
 
 -- 读档 / 开局完成时执行（赶在第 1 回合城邦建城之前）
+--   ⭐ 顺序：先按原版数量正常预留（地图保持原版外观），
+--           再额外造一批休眠城邦（T-144，默认关闭）。
 Events.LoadScreenClose.Add(function()
     CSF_Safe(CSF_ReserveCityStates);
+    CSF_Safe(CSF_CreateExtraDormantCityStates);
 end);
 
 -- 兜底：预留城邦的单位若再溜回地图，立刻清掉（保持休眠）
@@ -877,29 +1105,8 @@ end
 --     （实测迭代 141 行、能正确匹配到 LEADER_MINOR_CIV_*）。
 --     兜底：按命名规律推导 `CIVILIZATION_X -> LEADER_MINOR_CIV_X`，
 --     并用 `GameInfo.Leaders[推导值] ~= nil` 验证存在性后才采用。
-local function CSF_GetLeaderForCiv(sCiv)
-    if sCiv == nil or sCiv == "" then return nil end
-
-    -- ① 遍历匹配（主要途径）
-    local sLeader = nil;
-    pcall(function()
-        for row in GameInfo.CivilizationLeaders() do
-            if row.CivilizationType == sCiv then
-                sLeader = row.LeaderType;
-            end
-        end
-    end);
-    if sLeader ~= nil and sLeader ~= "" then return sLeader end
-
-    -- ② 命名规律 + 存在性验证（兜底）
-    local sGuess = "LEADER_MINOR_CIV_" .. string.gsub(sCiv, "^CIVILIZATION_", "");
-    local kLeader = nil;
-    pcall(function() kLeader = GameInfo.Leaders[sGuess] end);
-    if kLeader ~= nil then return sGuess end
-
-    -- ③ 都不行 → 返回 nil（调用方必须中止，绝不能把 nil 传给引擎）
-    return nil;
-end
+--   ⚠️ 本函数已【上移】到 CSF_CreateExtraDormantCityStates 之前 ——
+--      Lua 的 local 必须先定义后使用，否则调用点读到的是全局 nil（审计 #9）。
 
 -- ⚠️ 安全底线：绝不操作预分配槽（状态 5）——实测会让游戏崩溃（T-81）
 local function CSF_SlotStatus(iSlot)
