@@ -1,0 +1,30 @@
+# ---- Windows ----
+Thumbs.db
+Desktop.ini
+desktop.ini
+
+# ---- editors ----
+.vscode/
+.idea/
+*.swp
+*~
+
+# ---- temp / scratch ----
+_tmp_*
+*.tmp
+*.bak
+*.orig
+*.log
+
+# ---- local probe output (dev only) ----
+tools/_*.txt
+tools/_*.png
+tools/_*.json
+
+# ---- python ----
+__pycache__/
+*.pyc
+
+# ---- build output ----
+torelease/
+release/

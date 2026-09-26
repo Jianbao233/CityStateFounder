@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CityStateFounder / 城邦缔造者 — 城邦选择面板（InGame 上下文）
+  区段：InGameActions > AddUserInterfaces（Context=InGame）+ ImportFiles
+
+  视觉全部照抄【官方原文】，不自己拼九宫格：
+    外层窗框  Base/Assets/UI/Popups/UnitPromotionPopup.xml
+              （官方「从列表里选一个」的 InGame 弹窗，用途与本面板同类）
+              遮罩配方 / EnhancedToolTip 底 / Controls_HeaderMetal 标题条 /
+              Controls_CloseLarge 关闭钮 / Line 分隔线
+    中部玻璃  Base/Assets/UI/ReligionScreen.xml  +  Choosers/PantheonChooser.xml
+              （用户指定的「创建宗教那种玻璃质感」）
+              Religion_Panel 玻璃底 + Religion_Brace/BraceFlip/BraceDeco 两侧括号
+              + Religion_OverviewFrame 内容外框 + Religion_BeliefButton 列表条
+    裁剪      Base/Assets/UI/LoadScreen.xml 的 Group Clip="1"
+              （ScrollPanel 单独用不足以裁掉溢出内容，官方用 Group 显式裁剪）
+
+  文字统一用官方的宗教配色族（Color0 主色 + Color1 阴影色）。
+-->
+<Context xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Style="FontNormal20">
+
+  <Container ID="CSFRoot" Size="parent,parent" Hidden="1" ConsumeAllMouse="1">
+
+    <!-- ===== 遮罩：官方 UnitPromotionPopup 配方 ===== -->
+    <Box Color="0,0,0,150" Size="parent,parent" ConsumeMouse="1"/>
+    <Image Texture="Controls_Vignette" Size="500,500" Color="0,0,0,255" Anchor="R,B"/>
+    <Image Texture="Controls_Vignette" Size="500,500" Color="0,0,0,255" Anchor="R,T" FlipY="1"/>
+    <Image Texture="Controls_Vignette" Size="500,500" Color="0,0,0,255" Anchor="L,T" FlipY="1" FlipX="1"/>
+    <Image Texture="Controls_Vignette" Size="500,500" Color="0,0,0,255" Anchor="L,B" FlipX="1"/>
+    <Image Texture="Controls_Gradient" Size="150,parent" Color="0,0,0,255" Anchor="L,T" Rotate="90"/>
+    <Image Texture="Controls_Gradient" Size="150,parent" Color="0,0,0,255" Anchor="R,T" Rotate="270"/>
+    <Image Texture="Controls_Gradient" Size="parent,150" Color="0,0,0,255" Anchor="L,T" FlipY="1"/>
+    <Image Texture="Controls_Gradient" Size="parent,150" Color="0,0,0,255" Anchor="L,B"/>
+
+    <!-- ===== 面板本体：官方 EnhancedToolTip 底 =====
+         ⚠️ 刻意【不用任何出场动画】：
+            实测 SlideAnim 的 Begin 位移在面板由脚本打开时不会推进，会让面板
+            永久偏上 24px（用户反馈"太靠近屏幕边缘"）。既然动画实际不播，
+            就把它去掉，换取【精确居中】—— 正确性优先于"有个动画容器"。
+         （`lint.js` 因此会报一条 no-anim WARN，这是有意为之。） -->
+    <Grid ID="CSFWindow" Anchor="C,C" Size="980,740" Style="EnhancedToolTip" ConsumeAllMouse="1">
+
+      <Button ID="CSFCloseButton" Texture="Controls_CloseLarge" Size="44,44"
+              Anchor="R,T" Offset="10,0"/>
+
+      <!-- 标题条：官方 Controls_HeaderMetal -->
+      <Grid Texture="Controls_HeaderMetal" Offset="0,-3" Size="parent-4,50" Anchor="C,T"
+            SliceCorner="30,20" SliceSize="9,10" SliceTextureSize="69,42">
+        <Label ID="CSFTitle" String="{LOC_CSF_PANEL_TITLE:upper}" Anchor="C,C" Offset="0,5"
+               Color0="214,214,214,255" Color1="0,0,0,55" Style="FontFlair20"
+               WrapWidth="parent" TruncateWidth="900"/>
+      </Grid>
+
+      <!-- 提示行（两行：说明 + 可建数量） -->
+      <Label ID="CSFHint" Anchor="L,T" Offset="22,54" Size="parent-44,42" Align="L,T"
+             Color0="188,201,208,255" Color1="0,0,0,80" Style="FontNormal16"
+             WrapWidth="936" TruncateHeight="42"/>
+
+      <Line Color="48,73,95,255" Start="12,102" End="parent-12,102" Width="2"/>
+
+      <!-- ===== 中部：宗教玻璃列表区 =====
+           宽度链路（层层内缩，给文字留足余量）：
+             CSFWindow 980 → 玻璃面板 parent-40 = 940 → 内容外框 parent-90 = 850
+             → 裁剪组 parent-40 = 810 → 条目 780（右侧再留 30 给滚动条）
+           条目内文字：名称 TruncateWidth 300，加成 340 宽、距条目右缘 16 -->
+      <Grid ID="CSFListGlass" Anchor="C,T" Offset="0,110" Size="parent-40,410"
+            Texture="Religion_Panel" SliceCorner="24,30" SliceSize="0,0" SliceTextureSize="53,97"
+            Color="255,255,255,178">
+
+        <!-- 两侧括号装饰（官方 ReligionScreen 原样） -->
+        <Grid Size="14,parent-4" Offset="-10,2" Texture="Religion_BraceFlip"
+              SliceCorner="0,24" SliceSize="14,120" SliceTextureSize="14,166"/>
+        <Image Texture="Religion_BraceDeco" FlipX="1" Anchor="L,C" Offset="-17,0"/>
+        <Grid Size="14,parent-4" Offset="parent-9,2" Texture="Religion_Brace"
+              SliceCorner="0,24" SliceSize="14,120" SliceTextureSize="14,166"/>
+        <Image Texture="Religion_BraceDeco" Anchor="R,C" Offset="-16,0"/>
+
+        <!-- 内容外框 -->
+        <Grid Anchor="C,C" Size="parent-90,parent-34" Texture="Religion_OverviewFrame"
+              SliceCorner="15,15" SliceTextureSize="34,33">
+
+          <!-- ⚠️ 裁剪：官方 LoadScreen 用 Group Clip="1" 裁掉溢出内容 -->
+          <Group ID="CSFCityStateClip" Anchor="C,C" Size="parent-40,parent-26" Clip="1">
+            <ScrollPanel ID="CSFCityStateScroll" Size="parent,parent" Style="ScrollPanelWithRightBar">
+              <Stack ID="CSFCityStateStack" Anchor="C,T" StackGrowth="Down" StackPadding="4"/>
+            </ScrollPanel>
+          </Group>
+        </Grid>
+      </Grid>
+
+      <!-- ===== 选中城邦详情：同款玻璃条 ===== -->
+      <Grid Anchor="C,B" Offset="0,92" Size="parent-24,86"
+            Texture="Religion_Panel" SliceCorner="24,30" SliceSize="0,0" SliceTextureSize="53,97"
+            Color="255,255,255,178">
+        <Label ID="CSFSelectedName" Anchor="L,T" Offset="24,10" Style="ReligionDataHeading"
+               TruncateWidth="900"/>
+        <Label ID="CSFSelectedBonus" Anchor="L,T" Offset="24,42" Size="parent-48,38"
+               Style="ReligionDescription" WrapWidth="900"
+               TruncateHeight="38" TruncatedTooltip="1"/>
+      </Grid>
+
+      <!-- ===== 按钮：官方 PopupButtonInstance 尺寸 220,41 ===== -->
+      <GridButton ID="CSFConfirmButton" Size="220,41" Style="ButtonConfirm"
+                  Anchor="C,B" Offset="-120,32" String="{LOC_CSF_PANEL_CONFIRM:upper}"/>
+      <GridButton ID="CSFCancelButton" Size="220,41" Style="MainButton"
+                  Anchor="C,B" Offset="120,32" String="{LOC_CSF_PANEL_CANCEL:upper}"/>
+
+    </Grid>
+  </Container>
+
+  <!-- ===== 列表项模板：官方宗教信条条（Religion_BeliefButton，5 态）=====
+       内部用【绝对 Offset】排布（照官方 ReligionBelief / PantheonChooser 的 BeliefSlot）
+       宽度 780：裁剪组内宽 810，右侧留 30 给滚动条；条目内文字全部收在条目范围内 -->
+  <Instance Name="CSFCityStateSlot">
+    <GridButton ID="CSFEntryButton" Size="780,72" Texture="Religion_BeliefButton"
+                SliceCorner="96,36" SliceSize="1,1" SliceTextureSize="192,72"
+                StateOffsetIncrement="0,72" States="5" MinSize="192,72">
+
+      <!-- 城邦图标：圆形底座 + 图标 -->
+      <Image Size="60,60" Anchor="L,C" Offset="8,0" Texture="Controls_CircleRim40"/>
+      <Image ID="CSFEntryIcon" Size="48,48" Anchor="L,C" Offset="14,0"/>
+
+      <!-- 名称 / 类别 / 状态 -->
+      <Label ID="CSFEntryName" Anchor="L,T" Offset="78,12" Style="ReligionSubHeadingSmallNoKern"
+             TruncateWidth="290"/>
+      <Label ID="CSFEntryCategory" Anchor="L,T" Offset="78,40" Style="ReligionDataSmall"
+             TruncateWidth="130"/>
+      <Label ID="CSFEntryStatus" Anchor="L,T" Offset="222,40" Style="ReligionDataSmall"
+             TruncateWidth="190"/>
+
+      <!-- 加成摘要：距条目右缘 16，宽 340（左边界 424 > 名称右边界 368，不重叠）
+           ⚠️⚠️ Anchor="R,C" 时 Offset 必须为【正数】—— Offset 是从锚定边
+              向【父级内部】度量的；写 -16 会把文字推到父级右边界【之外】16px，
+              这正是"文字溢出玻璃窗"的根因（实测条目右缘 1243 / 文字右缘 1259）。 -->
+      <Label ID="CSFEntryBonus" Anchor="R,C" Offset="16,0" Size="340,60"
+             Style="ReligionDescription" WrapWidth="340"
+             TruncateHeight="60" TruncatedTooltip="1"/>
+    </GridButton>
+  </Instance>
+
+</Context>

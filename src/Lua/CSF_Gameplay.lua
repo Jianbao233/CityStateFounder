@@ -1,0 +1,1334 @@
+-- ===========================================================================
+-- CityStateFounder / 城邦缔造者 — 游戏内核心逻辑（GameCore / Script 上下文）
+-- 区段：InGameActions > AddGameplayScripts
+--
+-- 职责：
+--   ① 校验地块是否可建城邦（Create 对非法地块【静默失败】，必须自己挡）
+--   ② 为指定城邦玩家在指定位置建城（Players[id]:GetCities():Create(x,y)）
+--   ③ 建城后复查（静默失败时城市数不变）
+--   ④ 善后：删掉该城邦的地图外移民（否则它会自己找地方建城）
+--   ⑤ 查询城邦池（供 UI 面板使用）
+--
+-- ⚠️ 架构约束：
+--   - 「缔造者优势 +1 使者」不在这里做——它需要 UI.RequestPlayerOperation
+--     （见 UI/CSF_Panel.lua）。GameCore 侧拿不到 PlayerOperations。
+--   - UI 与 GameCore 是【两个 Lua VM】，LuaEvents/GameEvents 不跨 VM，
+--     必须经 ExposedMembers 桥接。
+--
+-- 依据（本项目实测）：
+--   T-62 休眠城邦可长期稳定存活（50 回合实测）
+--   T-25/26 Players[id]:GetCities():Create(x,y) 可用，能把 0 城城邦激活
+--   T-27 对非法地块【静默失败】（ok=true 但不建城）→ 必须自校验 + 建后复查
+--   T-14 城邦开局拿的是移民，第 1 回合才建城
+-- ===========================================================================
+
+print("[CSF] CSF_Gameplay.lua loading (GameCore context)");
+
+-- ---------------------------------------------------------------------------
+-- 常量
+-- ---------------------------------------------------------------------------
+-- 与其他城市/城邦的最小间距。
+--   ⚠️ 取值必须贴近【引擎自己的规则】，否则会出现"合法地形也建不了"：
+--      引擎的 `GlobalParameters.CITY_MIN_RANGE = 3`。
+--      实测教训（T-122）：我曾把它设成 6，导致用户在任何地方都被拒（`too_close`）。
+--      这里取 **3**（与引擎一致），把"是否真的能建"交给引擎判断。
+local CSF_MIN_CITY_DISTANCE = 3;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- 【有主地块】开关 —— 决定"能不能在自己领土上建邦"
+--   ⚠️ 必须定义在这里（在使用它的 CSF_IsValidFoundLocation 之前）！
+--      否则 Lua 读到的是全局 nil，开关会失效（审计脚本抓到过这个 bug）。
+--
+--   false（**默认**，最安全）：只允许【无主地块】。
+--        站在自家/他人领土上时明确报错，提示把「建邦使节」移到无主地。
+--        **绝不会因地块归属问题崩游戏。**
+--
+--   true：允许在【自家领土】上建邦——建城前先 `pPlot:SetOwner(-1)` 解除归属，
+--        再复查，仍归他人则中止。
+--        ⚠️ 这条路径**尚未实机验证**：用户最新一次崩溃（T-97）正是发生在
+--           "校验通过、Create 作用在有主地块上"的场景。官方 AustraliaScenario 用过
+--           `SetOwner(-1)`，但本模组尚未在实机上确认它能否消除该崩溃。
+--        想试就改成 true，并把 Lua.log 留好。
+-- ───────────────────────────────────────────────────────────────────────────
+local CSF_ALLOW_OWN_TERRITORY = false;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- 【重定向】开关 —— 默认【关闭】（实测发现严重缺陷，T-109）
+--   ⚠️ 必须定义在这里（在使用它的函数之前）！否则 Lua 读到全局 nil，
+--      开关会静默失效 —— 这个坑已经踩过两次，由 audit_csf.py 第 ⑨ 项兜住。
+--
+--   实测结论：把已有休眠城邦"改名"成目标文明**不可用**。
+--   `SetPlayerLeader` 只改文明/领袖/等级这三项"名字"，而该玩家的
+--   **运行期状态是开局时按【原文明】初始化的，且没有任何 Lua API 能改**
+--   （DLL 里 `AddTrait`/`GetTraits`/`RemoveTrait`/`AddModifier`/`SetColor` 全部命中 0）。
+--   玩家看到三个毛病：① 旗帜颜色还是原城邦的；② 宗主加成不生效；
+--   ③ UI 显示的是缓存的旧名字。且实测出现过**引擎级崩溃**。
+--
+--   true 会启用（**仅供实验**，会造出半成品城邦并可能崩游戏）。
+-- ───────────────────────────────────────────────────────────────────────────
+local CSF_ALLOW_RETARGET = false;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- 【动态创建（AddPlayer）】开关 —— 默认【关闭】
+--   ⚠️ 同上：必须在所有使用点之前定义，否则静默失效（已踩两次，audit 兜底）。
+--
+--   ⚠️⚠️⚠️ 实测结论（T-115）：**引擎不支持在运行时凭空造出一个完整的城邦玩家。**
+--      三条路线全部试过，全部失败：
+--        ① **全新槽 AddPlayer**（槽 54–61）：
+--           文明/领袖/等级/名字/`canInf` 都对，但
+--           `UI.GetPlayerColors(54)` = **nil** → 旗帜没有颜色；
+--           且 BetterCityStates 在 `CityStates_MPT.lua:374`
+--           （`GameInfo.DiplomaticStates[diploStateID]`）崩溃 → 城邦面板整张废掉。
+--        ② **复用槽**（`UninitializePlayer(休眠城邦槽)` → `AddPlayer` 拿回同一个槽）：
+--           颜色问题解决了（`SetColor nil` 警告消失），建邦当场全部正常，
+--           **但之后引擎崩溃**（产生 `.dmp`）。
+--        ③ **重定向**（改已有玩家的文明）：颜色/名字/特性全是旧文明的（T-109）。
+--      → **唯一 100% 可用的路径是【复用本局已有的城邦】**（引擎自己创建的玩家）。
+--
+--   想让本局有更多城邦可选：请在**开局设置**里提高城邦数量，或用官方城邦选择界面
+--   指定想要的城邦 —— 那些都是引擎在开局时正确创建的，本模组可以正常地把它们
+--   放到地图上。
+-- ───────────────────────────────────────────────────────────────────────────
+local CSF_ENABLE_DYNAMIC_CREATION = false;
+
+-- 【数量上限】每个玩家最多同时拥有几个「建邦使节」
+--   -1 = 不限制（= 自然上限，即"能造多少就造多少"，按用户要求的默认值）
+--    1 = 只能拥有 1 个（移植到别的 MOD 时想要的"仅能生产/购买一次"）
+--    2 = 最多 2 个，依此类推
+--
+--   ⚠️ 为什么用 Lua 而不是数据库：Units 表【没有】MaxPlayerInstances 列
+--      （已逐列核实全部 70 列；该字段只存在于 Buildings / GreatPeople / Projects），
+--      且游戏里没有 CityCanTrain 这类"能否生产"的钩子（本体与工坊均无）。
+--      所以做法是：单位一上地图（Events.UnitAddedToMap）就检查数量，
+--      超限则立即消掉。效果 = 硬上限。
+local CSF_MAX_ENVOYS_PER_PLAYER = -1;
+
+-- ---------------------------------------------------------------------------
+-- 工具：安全取值（GameCore 沙箱里很多东西会抛异常）
+-- ---------------------------------------------------------------------------
+local function CSF_Safe(f, ...)
+    local ok, v = pcall(f, ...);
+    if ok then return v end;
+    return nil;
+end
+
+-- ---------------------------------------------------------------------------
+-- 统计某玩家当前拥有几个「建邦使节」（含地图外）
+-- ---------------------------------------------------------------------------
+local function CSF_CountEnvoys(iPlayerID)
+    local pPlayer = Players[iPlayerID];
+    if pPlayer == nil then return 0 end
+
+    local iCount = 0;
+    local pUnits = CSF_Safe(function() return pPlayer:GetUnits() end);
+    if pUnits == nil then return 0 end
+
+    pcall(function()
+        for _, pUnit in pUnits:Members() do
+            local sType = CSF_Safe(function()
+                return GameInfo.Units[pUnit:GetType()].UnitType;
+            end);
+            if sType == "UNIT_CSF_ENVOY" then
+                iCount = iCount + 1;
+            end
+        end
+    end);
+    return iCount;
+end
+
+-- ---------------------------------------------------------------------------
+-- ① 地块合法性校验
+--    返回 (ok, reason)
+-- ---------------------------------------------------------------------------
+-- 地点校验。
+--   iFounderOwner：发起建邦的玩家（你的文明）。**允许在自己的领土上建邦**——
+--   单位通常就站在自家地盘上，若一律拒绝，功能基本没法用（实测踩到）。
+--   仍然拒绝：水域、他人领土、离已有城市太近。
+local function CSF_IsValidFoundLocation(iX, iY, iFounderOwner)
+    local pPlot = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
+    if pPlot == nil then
+        return false, "no_plot";
+    end
+
+    -- 陆地
+    local bWater = CSF_Safe(function() return pPlot:IsWater() end);
+    if bWater == true then
+        return false, "water";
+    end
+
+    -- ⚠️ 地图边界（实测 T-116）：`Create` 在【地图边缘】的格子上会**静默失败**
+    --    （实测 (0,35)：`Create returned OK` 但 `cities 0 -> 0`）。
+    --    这里保守地留出边界余量，避免让玩家白跑一趟。
+    --    ⚠️ API 已核实：`Map.GetGridWidth/GetGridHeight` **不存在**（DLL 命中 0），
+    --       正确的是 **`Map.GetGridSize()`**（返回宽、高两个值）。
+    local iW, iH = CSF_Safe(function() return Map.GetGridSize() end);
+    if iW ~= nil and iH ~= nil then
+        if iX < 2 or iY < 2 or iX > (iW - 3) or iY > (iH - 3) then
+            return false, "map_edge";
+        end
+    end
+
+    -- 至少要有相邻陆地（城邦城市需要落脚点）
+    --   ⚠️ 原来要求 3 格，实测太严（用户日志 `too_little_land at 17,34`）。
+    --      引擎对 1 格小岛也能建城，这里只要求【至少 1 格相邻陆地】。
+    local iLand = 0;
+    for _, kOff in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
+        local pN = CSF_Safe(function() return Map.GetPlot(iX + kOff[1], iY + kOff[2]) end);
+        if pN ~= nil then
+            local bN = CSF_Safe(function() return pN:IsWater() end);
+            if bN == false then iLand = iLand + 1 end
+        end
+    end
+    if iLand < 1 then
+        return false, "too_little_land";
+    end
+
+    -- 领土：无主地永远允许；有主地取决于 CSF_ALLOW_OWN_TERRITORY
+    --   ⚠️ 实测（T-97）：`Create` 作用在【有主地块】上会导致游戏崩溃。
+    --      所以默认【拒绝一切有主地块】，这是唯一"保证不崩"的策略。
+    local iOwner = CSF_Safe(function() return pPlot:GetOwner() end);
+    if iOwner ~= nil and iOwner ~= -1 then
+        if not CSF_ALLOW_OWN_TERRITORY then
+            -- 默认安全模式：区分"自家"和"他人"，给出更准确的提示
+            if iFounderOwner ~= nil and iOwner == iFounderOwner then
+                return false, "owned_own";
+            end
+            return false, "owned_by_other";
+        end
+        -- 开关打开时：只允许【自家】领土（他人领土仍然拒绝）
+        if iFounderOwner == nil or iOwner ~= iFounderOwner then
+            return false, "owned_by_other";
+        end
+    end
+
+    -- 与其他城市的最小间距
+    -- ⚠️ 原实现是 `0..100 × 0..100` 逐格 pcall 调 GetCityAt = 10201 次，又慢又危险；
+    --    改成遍历在场玩家的城市列表（Members() 迭代）。
+    local bTooClose = false;
+    local tPlayers = {};
+    CSF_Safe(function()
+        for _, iPlayer in ipairs(PlayerManager.GetAliveMajorIDs()) do tPlayers[#tPlayers + 1] = iPlayer end
+    end);
+    CSF_Safe(function()
+        for _, iPlayer in ipairs(PlayerManager.GetAliveMinorIDs()) do tPlayers[#tPlayers + 1] = iPlayer end
+    end);
+
+    for _, iPlayer in ipairs(tPlayers) do
+        local pP = Players[iPlayer];
+        if pP ~= nil then
+            local pCities = CSF_Safe(function() return pP:GetCities() end);
+            if pCities ~= nil then
+                -- ⚠️ 用 Members() 遍历。
+                --    实测教训：`GetCityByIndex(i)` **在 DLL 里根本不存在**（命中 0），
+                --    原来那样写等于距离检查是死代码（每次都被 pcall 吞成 nil）。
+                --    Civ6 的集合对象统一用 Members() 迭代（同 pUnits:Members()）。
+                --    再套一层 pcall：遍历中若集合变动，迭代器会失效。
+                pcall(function()
+                    for _, pCity in pCities:Members() do
+                        local iCX = CSF_Safe(function() return pCity:GetX() end);
+                        local iCY = CSF_Safe(function() return pCity:GetY() end);
+                        if iCX ~= nil and iCY ~= nil then
+                            local iDist = CSF_Safe(function()
+                                return Map.GetPlotDistance(iX, iY, iCX, iCY);
+                            end);
+                            if iDist ~= nil and iDist < CSF_MIN_CITY_DISTANCE then
+                                bTooClose = true;
+                            end
+                        end
+                    end
+                end);
+            end
+        end
+    end
+
+    if bTooClose then
+        return false, "too_close";
+    end
+
+    return true, "ok";
+end
+
+-- ---------------------------------------------------------------------------
+-- ④ 删掉某玩家的【地图外】单位
+--    地图外单位的坐标是 (-9999,-9999)（引擎哨兵值，实测确认）
+--
+--    ⚠️⚠️ 必须【先收集、后删除】！
+--        原实现直接在 `for _, pUnit in pUnits:Members() do ... UnitManager.Kill(pUnit) end`
+--        的循环体里杀单位 —— **边遍历边改集合会让迭代器失效**，行为未定义，
+--        是潜在的引擎崩溃点（本文件别处早已写明这条规则，这里却违反了）。
+--        改为：第一遍只收集候选，第二遍统一 kill。
+-- ---------------------------------------------------------------------------
+local function CSF_DeleteOffmapUnits(iPlayerID)
+    local pPlayer = Players[iPlayerID];
+    if pPlayer == nil then return 0 end
+
+    local pUnits = CSF_Safe(function() return pPlayer:GetUnits() end);
+    if pUnits == nil then return 0 end
+
+    -- 第一遍：只收集，不改动任何东西
+    local tOffmap = {};
+    pcall(function()
+        for _, pUnit in pUnits:Members() do
+            local iX = CSF_Safe(function() return pUnit:GetX() end);
+            local iY = CSF_Safe(function() return pUnit:GetY() end);
+            if iX ~= nil and iY ~= nil and (iX < 0 or iY < 0) then
+                tOffmap[#tOffmap + 1] = pUnit;
+            end
+        end
+    end);
+
+    -- 第二遍：统一删除（此时已不在 Members() 遍历中）
+    local iKilled = 0;
+    for _, pUnit in ipairs(tOffmap) do
+        local bOk = pcall(function() UnitManager.Kill(pUnit, false) end);
+        if bOk then iKilled = iKilled + 1 end
+    end
+
+    print("[CSF] deleted " .. tostring(iKilled) .. " offmap unit(s) of player " ..
+          tostring(iPlayerID) .. " (candidates " .. tostring(#tOffmap) .. ")");
+    return iKilled;
+end
+
+-- ---------------------------------------------------------------------------
+-- ④b 消耗掉用来建邦的「建邦使节」单位
+--
+--    ⚠️⚠️ 为什么必须【在 Create 之前】调用（实测 T-112）：
+--        用户实机崩溃的日志精确停在 `[step] cities:Create(48,13) ...`（没有 returned OK）。
+--        对照我自己的测试：全部传的是 `unitID = nil`（那一格上没有单位）→ 从未崩过。
+--        真实使用时，**建邦使节就站在那一格上**，于是出现了
+--        「玩家 0 的单位」与「玩家 54 的城市」同占一格 → 引擎状态冲突 → 崩溃。
+--        做法：**先把使节消耗掉（腾空这一格），再建城**。使节本来就是要被消耗的，
+--        只是原来的顺序反了。
+--
+--    优先级 1：用 UI 传来的【单位 ID + 拥有者 ID】精确定位（最可靠）
+--    优先级 2：退化为按坐标扫描所有主文明的单位
+--    ⚠️ 必须先收集、后删除：遍历 pUnits:Members() 时 Kill 会让迭代器失效。
+-- ---------------------------------------------------------------------------
+local function CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID)
+    if iX == nil or iY == nil then return 0 end
+
+    local tToKill = {};
+    local tSeen   = {};
+
+    local function AddCandidate(pUnit)
+        if pUnit == nil then return end
+        local iID = CSF_Safe(function() return pUnit:GetID() end);
+        if iID ~= nil and tSeen[iID] then return end
+        if iID ~= nil then tSeen[iID] = true end
+        tToKill[#tToKill + 1] = pUnit;
+    end
+
+    -- 优先级 1：按单位 ID 直接取
+    if iUnitID ~= nil and iOwnerID ~= nil then
+        local pDirect = CSF_Safe(function() return UnitManager.GetUnit(iOwnerID, iUnitID) end);
+        if pDirect ~= nil then
+            print("[CSF] consume: found envoy by ID (owner=" .. tostring(iOwnerID) ..
+                  " unit=" .. tostring(iUnitID) .. ")");
+            AddCandidate(pDirect);
+        else
+            print("[CSF] consume: GetUnit(" .. tostring(iOwnerID) .. "," ..
+                  tostring(iUnitID) .. ") = nil; 退回坐标扫描");
+        end
+    end
+
+    -- 优先级 2：按坐标扫（仅当上面没拿到时才做，避免误删别的单位）
+    if #tToKill == 0 then
+        local tMajors = CSF_Safe(function() return PlayerManager.GetAliveMajorIDs() end) or {};
+        for _, iMajor in ipairs(tMajors) do
+            local pM = Players[iMajor];
+            if pM ~= nil then
+                local pUnits = CSF_Safe(function() return pM:GetUnits() end);
+                if pUnits ~= nil then
+                    pcall(function()
+                        for _, pUnit in pUnits:Members() do
+                            local uX = CSF_Safe(function() return pUnit:GetX() end);
+                            local uY = CSF_Safe(function() return pUnit:GetY() end);
+                            local sType = CSF_Safe(function()
+                                return GameInfo.Units[pUnit:GetType()].UnitType;
+                            end);
+                            if sType == "UNIT_CSF_ENVOY" and uX == iX and uY == iY then
+                                AddCandidate(pUnit);
+                            end
+                        end
+                    end);
+                end
+            end
+        end
+    end
+
+    local iKilled = 0;
+    for _, pUnit in ipairs(tToKill) do
+        local bOk = pcall(function() UnitManager.Kill(pUnit, false) end);
+        if bOk then iKilled = iKilled + 1 end
+    end
+    print("[CSF] consume done, killed=" .. tostring(iKilled));
+    return iKilled;
+end
+
+-- ---------------------------------------------------------------------------
+-- ② + ③ 建城邦主流程
+--    返回 (ok, reason)
+-- ---------------------------------------------------------------------------
+local function CSF_FoundCityState(iCityStateID, iX, iY, iUnitID, iOwnerID)
+    if iCityStateID == nil or iX == nil or iY == nil then
+        return false, "bad_args";
+    end
+
+    local pPlayer = Players[iCityStateID];
+    if pPlayer == nil then
+        return false, "no_player";
+    end
+
+    local bAlive = CSF_Safe(function() return pPlayer:IsAlive() end);
+    if bAlive ~= true then
+        return false, "dead";
+    end
+
+    -- ① 自校验地块
+    --    ⚠️ 必须把 iOwnerID（发起建邦的玩家）传进去，与调用方的【预验证】保持完全一致。
+    --       否则会出现：预验证通过（自家领土 OK）→ 创建了玩家 → 这里又不通过
+    --       → 留下孤儿玩家（实测踩到的崩溃路径）。
+    local bValid, sReason = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+    if not bValid then
+        print("[CSF] invalid location (" .. tostring(sReason) .. ") at " .. tostring(iX) .. "," .. tostring(iY));
+        return false, sReason;
+    end
+
+    -- 记录建城前的城市数（用于复查）
+    local iBefore = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
+
+    -- ①b ⚠️⚠️ 关键安全步骤：把地块归属清空后再建城
+    --     实测证据（T-97）：第 24 次崩溃时校验【已通过】（放宽后允许自家领土），
+    --     于是 `Create` 第一次真正作用在【有主地块】上 → 游戏崩溃。
+    --     对照：我所有成功测试都在【无主地块】上。
+    --     机理推测：在属于 A 的地块上给 B 建城，会造成领土归属冲突 → 引擎数据不一致。
+    --     做法：先 SetOwner(-1) 解除归属；**再复查**，若仍归属他人则【中止】，
+    --           绝不冒险调用 Create（宁可报错也不能崩游戏）。
+    local pPlot = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
+    if pPlot ~= nil then
+        local iPlotOwner = CSF_Safe(function() return pPlot:GetOwner() end);
+        if iPlotOwner ~= nil and iPlotOwner ~= -1 then
+            print("[CSF] [step] plot (" .. tostring(iX) .. "," .. tostring(iY) ..
+                  ") owned by " .. tostring(iPlotOwner) .. " -> clearing owner before Create");
+            pcall(function() pPlot:SetOwner(-1) end);
+            local iAfterClear = CSF_Safe(function() return pPlot:GetOwner() end);
+            if iAfterClear ~= nil and iAfterClear ~= -1 then
+                print("[CSF] [step] ABORT: 地块归属未能清空（仍属 " ..
+                      tostring(iAfterClear) .. "），不调用 Create");
+                return false, "owned_not_cleared";
+            end
+            print("[CSF] [step] plot owner cleared -> now unowned");
+        end
+    end
+
+    -- ①c ⚠️⚠️ 关键顺序：**先把建邦使节消耗掉，腾空这一格，再建城**（T-112）
+    --     实测崩溃日志精确停在这里：`[step] cities:Create(48,13) ...`（无 returned OK）。
+    --     原因：使节（玩家 0 的单位）还站在那一格上，而我们要给玩家 54 在同一格建城
+    --     → 一格同时有两个玩家的对象 → 引擎崩溃。
+    print("[CSF] [step] consume envoy BEFORE Create (unitID=" .. tostring(iUnitID) ..
+          " owner=" .. tostring(iOwnerID) .. ")");
+    CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+    print("[CSF] [step] consume before Create done");
+
+    -- ② 建城（核心 API）
+    --    细粒度日志：万一崩在这儿，日志能精确到这一步（T-94 排查手段）
+    print("[CSF] [step] cities:Create(" .. tostring(iX) .. "," .. tostring(iY) ..
+          ") player=" .. tostring(iCityStateID) .. " before=" .. tostring(iBefore));
+    local bCalled = pcall(function()
+        pPlayer:GetCities():Create(iX, iY);
+    end);
+    if not bCalled then
+        return false, "create_threw";
+    end
+    print("[CSF] [step] cities:Create returned OK");
+
+    -- ③ 复查：Create 对非法地块【静默失败】——不报错但城市数不变
+    local iAfter = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
+    if iAfter <= iBefore then
+        print("[CSF] Create silently failed (cities " .. tostring(iBefore) .. " -> " .. tostring(iAfter) .. ")");
+        -- ⚠️ 补偿：使节已经在上一步被消耗了，但城没建成。
+        --    在这里【在同格重生一个使节】，避免玩家白白损失一个单位（T-116）。
+        if iOwnerID ~= nil then
+            local bBack = pcall(function()
+                UnitManager.InitUnit(iOwnerID, "UNIT_CSF_ENVOY", iX, iY);
+            end);
+            print("[CSF] 建城失败 → 已在 (" .. tostring(iX) .. "," .. tostring(iY) ..
+                  ") 补偿重生使节，ok=" .. tostring(bBack));
+        end
+        return false, "silent_fail";
+    end
+
+    -- ④ 善后 a：删掉该城邦的地图外移民
+    print("[CSF] [step] DeleteOffmapUnits(" .. tostring(iCityStateID) .. ")");
+    CSF_DeleteOffmapUnits(iCityStateID);
+    print("[CSF] [step] DeleteOffmapUnits done");
+
+    -- ④ 善后 b：消耗使节 —— **已提前到 Create 之前执行**（见上方 ①c，T-112）。
+    --    这里不再重复消耗，避免二次删除。
+
+    print("[CSF] city-state " .. tostring(iCityStateID) .. " founded at " ..
+          tostring(iX) .. "," .. tostring(iY) .. " (cities " ..
+          tostring(iBefore) .. " -> " .. tostring(iAfter) .. ")");
+
+    return true, "ok";
+end
+
+-- ---------------------------------------------------------------------------
+-- ⑤ 城邦池查询（供 UI 面板用；GameCore 侧也能跑 DB.ConfigurationQuery）
+-- ---------------------------------------------------------------------------
+local function CSF_GetCityStatePool()
+    local sDomain = "Expansion2CityStates";
+    local sRuleset = CSF_Safe(function() return GameConfiguration.GetValue("RULESET") end);
+    if sRuleset == "RULESET_EXPANSION_1" then
+        sDomain = "Expansion1CityStates";
+    elseif sRuleset ~= "RULESET_EXPANSION_2" then
+        sDomain = "StandardCityStates";
+    end
+
+    local tRows = CSF_Safe(function()
+        return DB.ConfigurationQuery(
+            "SELECT CivilizationType, Name, Icon, CityStateCategory, Bonus, Bonus_XP1, Bonus_XP2 " ..
+            "FROM CityStates WHERE Domain = ? ORDER BY CityStateCategory, CivilizationType", sDomain);
+    end);
+
+    local tOut = {};
+    if tRows ~= nil then
+        for _, row in ipairs(tRows) do
+            tOut[#tOut + 1] = {
+                CivType  = row.CivilizationType,
+                Name     = row.Name,
+                Icon     = row.Icon,
+                Category = row.CityStateCategory,
+                Bonus    = row.Bonus,
+                BonusXP1 = row.Bonus_XP1,
+                BonusXP2 = row.Bonus_XP2,
+            };
+        end
+    end
+    print("[CSF] pool domain=" .. tostring(sDomain) .. " count=" .. tostring(#tOut));
+    return tOut;
+end
+
+-- ---------------------------------------------------------------------------
+-- ⑥ 本局【休眠中】的城邦（= 预留槽位，玩家真正能选的目标）
+--
+--    ⚠️ 设计要点（T-65）：预留城邦的身份在【地图生成时】就固定了，
+--    运行时【改不了】（PlayerConfigurations:SetLeaderTypeName 在 GameCore 为 nil）。
+--    所以面板只能列出"本局已休眠的城邦"，而不是全池。
+--    这与用户已确认的 D-09「城邦池开局前定」一致。
+--
+--    每个条目 = 休眠城邦玩家 + 它在 CityStates 配置表里的展示数据
+--    （名称 / 图标 / 类别 / 三档加成 LOC 键）
+-- ---------------------------------------------------------------------------
+local function CSF_GetDormantCityStates()
+    -- 先把 CityStates 配置表读成 map：CivilizationType -> row
+    local tPool = {};
+    local sRuleset = CSF_Safe(function() return GameConfiguration.GetValue("RULESET") end);
+    local sDomain = "Expansion2CityStates";
+    if sRuleset == "RULESET_EXPANSION_1" then
+        sDomain = "Expansion1CityStates";
+    elseif sRuleset ~= "RULESET_EXPANSION_2" then
+        sDomain = "StandardCityStates";
+    end
+
+    local tRows = CSF_Safe(function()
+        return DB.ConfigurationQuery(
+            "SELECT CivilizationType, Name, Icon, CityStateCategory, Bonus, Bonus_XP1, Bonus_XP2 " ..
+            "FROM CityStates WHERE Domain = ?", sDomain);
+    end);
+    if tRows ~= nil then
+        for _, row in ipairs(tRows) do
+            tPool[row.CivilizationType] = row;
+        end
+    end
+
+    -- 再枚举存活城邦玩家，挑出【休眠】的（0 城）
+    local tOut = {};
+    local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    for _, iPlayer in ipairs(tIDs) do
+        local pPlayer = Players[iPlayer];
+        if pPlayer ~= nil then
+            local iCities = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
+            if iCities == 0 then
+                local sCiv    = CSF_Safe(function() return PlayerConfigurations[iPlayer]:GetCivilizationTypeName() end);
+                local sLeader = CSF_Safe(function() return PlayerConfigurations[iPlayer]:GetLeaderTypeName() end);
+                local row     = (sCiv ~= nil) and tPool[sCiv] or nil;
+
+                tOut[#tOut + 1] = {
+                    PlayerID = iPlayer,
+                    Civ      = sCiv,
+                    Leader   = sLeader,
+                    -- 池里查不到就退化显示（例如 mod 加的城邦不在配置表）
+                    Name     = (row ~= nil) and row.Name     or ("LOC_CIVILIZATION_" .. tostring(sCiv) .. "_FRONTEND_NAME"),
+                    Icon     = (row ~= nil) and row.Icon     or ("ICON_" .. tostring(sCiv)),
+                    Category = (row ~= nil) and row.CityStateCategory or "UNKNOWN",
+                    Bonus    = (row ~= nil) and row.Bonus    or nil,
+                    BonusXP1 = (row ~= nil) and row.Bonus_XP1 or nil,
+                    BonusXP2 = (row ~= nil) and row.Bonus_XP2 or nil,
+                };
+            end
+        end
+    end
+
+    print("[CSF] dormant city-states = " .. tostring(#tOut) ..
+          " (domain=" .. tostring(sDomain) .. ", pool=" .. tostring(#tRows or 0) .. ")");
+    return tOut;
+end
+
+-- ---------------------------------------------------------------------------
+-- ⑦ 运行时预留：开局把 N 个城邦「送下地图」保持休眠
+--
+--    为什么不用地图脚本（AssignStartingPlots.lua）：
+--      那条路线要覆盖原生同名文件，会与 CCB Maps（include("AssignStartingPlots")）
+--      和 Free City States（Override/XP2/AssignStartingPlots.lua）三方抢同一份文件
+--      —— 实测已在单机开局时引发
+--        BBM_AssignStartingPlots.lua:353 attempt to index a nil value / GenerateMap 失败。
+--      所以改走运行时，完全不碰地图脚本。
+--
+--    机制（S0 已实测：这样造出的休眠城邦可稳定存活 50 回合且保持 0 城）：
+--      ① UnitManager.InitUnit(id, "UNIT_SETTLER", -1, -1)  → 地图外给一个移民（保命）
+--      ② 杀掉它在地图上的全部单位                        → 它没有起始位置，不会自己建城
+--
+--    事件选择依据 FreeCityStates.lua 的既有钩子：
+--      Events.LoadScreenClose  —— 读档/开局完成，赶在第 1 回合处理之前
+--      Events.UnitAddedToMap   —— 单位上地图时拦截（防止预留城邦的单位溜回地图）
+-- ---------------------------------------------------------------------------
+-- 【预留几个城邦】——决定玩家能选到多少个城邦
+--   语义：开局时把本局【还没建城】的城邦里，取这么多个"送下地图"保持休眠。
+--         它们就是面板里真正可用的那批（可被玩家逐个放上地图）。
+--
+--   ⭐ 默认 -1 = 【全部预留】（能藏多少藏多少）。
+--      理由：本局城邦总数由【开局设置】决定（MapSizes.xml 的 MaxCityStates）：
+--         Duel 最多 6 / Tiny 10 / Small 14 / Standard 18 / Large 22 / **Huge 24**
+--      预留越多，玩家可选的城邦就越多。这正是"想要更多城邦"的正确杠杆。
+--
+--   取值：
+--     -1  = 全部预留（**默认**）——面板里本局所有城邦都能选
+--      0  = 不预留（纯原版行为）
+--      N  = 最多预留 N 个
+--
+--   ⚠️ 取舍：预留的城邦**开局不会自行建城**（保持休眠），
+--      所以地图上的活跃城邦会变少 —— 这些城邦是留给玩家"亲手放上去"的。
+local CSF_RESERVED_COUNT = -1;
+
+local m_tReserved = {};          -- 已预留的城邦 playerID 集合
+local m_tOrphan   = {};          -- 【动态创建后建城失败】留下的玩家：Civ -> playerID
+                                 -- 下次建同一文明时复用它，避免反复 AddPlayer 累积孤儿
+                                 -- （孤儿玩家会卡在引擎里，累积后导致崩溃——实测踩到）
+
+local function CSF_IsReserved(iPlayerID)
+    return m_tReserved[iPlayerID] == true;
+end
+
+-- 把某城邦的地图外移民补上，并清掉它在地图上的一切单位
+local function CSF_SendPlayerOffMap(iPlayerID)
+    local pPlayer = Players[iPlayerID];
+    if pPlayer == nil then return false end
+
+    local bAlive = CSF_Safe(function() return pPlayer:IsAlive() end);
+    if bAlive ~= true then return false end
+
+    -- ① 地图外给一个移民（引擎会把坐标落到 (-9999,-9999)）
+    CSF_Safe(function()
+        UnitManager.InitUnit(iPlayerID, "UNIT_SETTLER", -1, -1);
+    end);
+
+    -- ② 杀掉地图上的单位
+    --    ⚠️ 必须【先收集、后删除】：原实现在 `for _, pUnit in pUnits:Members() do`
+    --       的循环体里直接 `UnitManager.Kill(pUnit)` —— **边遍历边改集合会让迭代器失效**，
+    --       行为未定义，是潜在的引擎崩溃点。而且这段**每次读档都会执行**
+    --       （日志实测：每个预留城邦杀 3 个单位 × 8 个城邦）。
+    local tOnMap = {};
+    local pUnits = CSF_Safe(function() return pPlayer:GetUnits() end);
+    if pUnits ~= nil then
+        pcall(function()
+            for _, pUnit in pUnits:Members() do
+                local x = CSF_Safe(function() return pUnit:GetX() end);
+                local y = CSF_Safe(function() return pUnit:GetY() end);
+                if x ~= nil and y ~= nil and (x >= 0 or y >= 0) then
+                    tOnMap[#tOnMap + 1] = pUnit;
+                end
+            end
+        end);
+    end
+
+    local iKilled = 0;
+    for _, pUnit in ipairs(tOnMap) do
+        local bOk = pcall(function() UnitManager.Kill(pUnit, false) end);
+        if bOk then iKilled = iKilled + 1 end
+    end
+
+    print("[CSF] reserve: city-state " .. tostring(iPlayerID) ..
+          " sent off-map (killed " .. tostring(iKilled) .. " on-map unit(s), candidates " ..
+          tostring(#tOnMap) .. ")");
+    return true;
+end
+
+-- 开局/读档完成后执行预留
+--   CSF_RESERVED_COUNT == -1 表示【全部预留】（能藏多少藏多少）
+local function CSF_ReserveCityStates()
+    local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    local iDone = 0;
+    local bAll = (CSF_RESERVED_COUNT == nil or CSF_RESERVED_COUNT < 0);
+
+    for _, iPlayer in ipairs(tIDs) do
+        if (not bAll) and iDone >= CSF_RESERVED_COUNT then break end
+
+        -- 已经是预留的就跳过
+        if not CSF_IsReserved(iPlayer) then
+            local iCities = CSF_Safe(function()
+                return Players[iPlayer]:GetCities():GetCount();
+            end) or 0;
+
+            -- 只对【还没建城】的城邦动手（已经建城的抢不回来了）
+            if iCities == 0 then
+                if CSF_SendPlayerOffMap(iPlayer) then
+                    m_tReserved[iPlayer] = true;
+                    iDone = iDone + 1;
+                end
+            end
+        end
+    end
+
+    print("[CSF] reserve done: " .. tostring(iDone) .. " / " .. tostring(#tIDs) ..
+          " city-state(s) reserved (target " ..
+          (bAll and "ALL" or tostring(CSF_RESERVED_COUNT)) .. ") —— " ..
+          "这 " .. tostring(iDone) .. " 个就是面板里可用（可放上地图）的城邦");
+    return iDone;
+end
+
+-- 读档 / 开局完成时执行（赶在第 1 回合城邦建城之前）
+Events.LoadScreenClose.Add(function()
+    CSF_Safe(CSF_ReserveCityStates);
+end);
+
+-- 兜底：预留城邦的单位若再溜回地图，立刻清掉（保持休眠）
+Events.UnitAddedToMap.Add(function(iPlayerID, iUnitID)
+    if iPlayerID == nil then return end
+
+    -- ① 预留城邦：任何上地图的单位都清掉
+    if CSF_IsReserved(iPlayerID) then
+        local pUnit = CSF_Safe(function() return UnitManager.GetUnit(iPlayerID, iUnitID) end);
+        if pUnit ~= nil then
+            local x = CSF_Safe(function() return pUnit:GetX() end) or 0;
+            local y = CSF_Safe(function() return pUnit:GetY() end) or 0;
+            if x >= 0 or y >= 0 then
+                UnitManager.Kill(pUnit, false);
+                print("[CSF] reserve: killed stray on-map unit of reserved city-state " .. tostring(iPlayerID));
+            end
+        end
+        return;
+    end
+
+    -- ② 建邦使节：超过数量上限就直接消掉
+    if CSF_MAX_ENVOYS_PER_PLAYER > 0 then
+        local pUnit = CSF_Safe(function() return UnitManager.GetUnit(iPlayerID, iUnitID) end);
+        if pUnit ~= nil then
+            local sType = CSF_Safe(function()
+                return GameInfo.Units[pUnit:GetType()].UnitType;
+            end);
+            if sType == "UNIT_CSF_ENVOY" then
+                local iCount = CSF_CountEnvoys(iPlayerID);
+                if iCount > CSF_MAX_ENVOYS_PER_PLAYER then
+                    UnitManager.Kill(pUnit, false);
+                    print("[CSF] cap: player " .. tostring(iPlayerID) ..
+                          " already has " .. tostring(iCount - 1) ..
+                          " envoy(s) (cap " .. tostring(CSF_MAX_ENVOYS_PER_PLAYER) .. "); removed the new one");
+                end
+            end
+        end
+    end
+end);
+
+-- 供 UI 手动触发（调试用）
+local function CSF_ForceReserve()
+    return CSF_ReserveCityStates();
+end
+
+-- ---------------------------------------------------------------------------
+-- ⑧ 【混合方案】可建立城邦总表 + 按文明建邦
+--
+--    需求：面板要列出【全部可生成城邦】（XP2 = 48 个），而不是只列本局已有的。
+--    实测约束（见 决策记录 T-69~T-86）：
+--      · 本局地图只创建 N 个城邦玩家（随地图尺寸，约 10~14）
+--      · 运行时可 AddPlayer 动态创建，但【上限 8 个/局】（空槽只有 54–61）
+--      · 动态创建的城邦 CanReceiveInfluence=false（拿不到 CITY_STATE 等级，
+--        因为等级是开局前的配置库值、运行时无 setter）
+--      · 操作预分配槽（15–53）会崩游戏 —— 绝对不能碰
+--
+--    因此采用混合策略：
+--      ★ 优先：本局已有【休眠中】的同文明玩家 → 用它（机制完整，能收使者）
+--      ★ 兜底：没有则 AddPlayer 动态创建（能建城/能显示，但不能收使者，面板标注）
+-- ---------------------------------------------------------------------------
+
+-- 返回【全部可建立城邦】列表（XP2 为 48 条），每条附带"本局是否已有休眠玩家"
+local function CSF_GetFoundableCityStates()
+    local sRuleset = CSF_Safe(function() return GameConfiguration.GetValue("RULESET") end);
+    local sDomain = "Expansion2CityStates";
+    if sRuleset == "RULESET_EXPANSION_1" then
+        sDomain = "Expansion1CityStates";
+    elseif sRuleset ~= "RULESET_EXPANSION_2" then
+        sDomain = "StandardCityStates";
+    end
+
+    local tRows = CSF_Safe(function()
+        return DB.ConfigurationQuery(
+            "SELECT CivilizationType, Name, Icon, CityStateCategory, Bonus, Bonus_XP1, Bonus_XP2 " ..
+            "FROM CityStates WHERE Domain = ?", sDomain);
+    end) or {};
+
+    -- 本局「休眠中」的城邦玩家：CivilizationType -> playerID
+    --   ⚠️⚠️ 必须排除【已派出移民、还没建城】的城邦（T-124）。
+    --   原因：建邦流程是「把移民放到目标格 → 城邦在自己的回合建城」，
+    --   在它建城之前 `GetCities():GetCount()` 仍是 0 —— 若不排除，
+    --   同一个城邦会**继续出现在可选列表里**，玩家能再选一次，
+    --   于是同一城邦拿到 2 个移民 → 建出两个城 → 出现无法正常互动的假城邦。
+    --   判定方式：**地图上是否已有该城邦的单位**（休眠城邦的单位开局已被清掉）。
+    local tDormant = {};
+    local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    for _, iPlayer in ipairs(tIDs) do
+        local pPlayer = Players[iPlayer];
+        if pPlayer ~= nil then
+            local iCities = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
+            if iCities == 0 then
+                -- 地图上还有单位 → 说明已经派出去了，正在等它建城 → 不算休眠
+                local bOnMap = false;
+                CSF_Safe(function()
+                    for _, pUnit in pPlayer:GetUnits():Members() do
+                        local x = pUnit:GetX();
+                        local y = pUnit:GetY();
+                        if x ~= nil and y ~= nil and x >= 0 and y >= 0 then
+                            bOnMap = true;
+                            break;
+                        end
+                    end
+                end);
+
+                if bOnMap then
+                    print("[CSF] skip city-state " .. tostring(iPlayer) ..
+                          " —— 已派出移民、待建城（防止重复选择）");
+                else
+                    local sCiv = CSF_Safe(function()
+                        return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
+                    end);
+                    if sCiv ~= nil and tDormant[sCiv] == nil then
+                        tDormant[sCiv] = iPlayer;
+                    end
+                end
+            end
+        end
+    end
+
+    -- 本局【任意】休眠城邦的数量——决定还有多少个"完整机制"的名额
+    --   （有重定向策略后，只要还有任意一个休眠玩家，就能建出任意文明）
+    local iDormantCount = 0;
+    for _ in pairs(tDormant) do iDormantCount = iDormantCount + 1 end
+
+    local tOut = {};
+    for _, row in ipairs(tRows) do
+        local iDormant = tDormant[row.CivilizationType];
+        -- 机制完整性分档：
+        --   "reuse"    本局已有同文明休眠玩家 → 直接复用（**唯一真正可用的路径**）
+        --   "retarget" 借用休眠玩家改成目标文明 → ⚠️ 默认关闭（半成品，见 T-109）
+        --   "dynamic"  AddPlayer 新建        → ⚠️ 默认关闭（半成品 + 崩溃风险）
+        local sMode;
+        if iDormant ~= nil then
+            sMode = "reuse";
+        elseif CSF_ALLOW_RETARGET then
+            sMode = "retarget";          -- ⚠️ 半成品（T-109），默认关
+        elseif CSF_ENABLE_DYNAMIC_CREATION then
+            sMode = "dynamic";           -- ⭐ 实测正确（T-111）
+        else
+            sMode = "unavailable";
+        end
+        tOut[#tOut + 1] = {
+            Civ              = row.CivilizationType,
+            Name             = row.Name,
+            Icon             = row.Icon,
+            Category         = row.CityStateCategory,
+            Bonus            = row.Bonus,
+            BonusXP1         = row.Bonus_XP1,
+            BonusXP2         = row.Bonus_XP2,
+            ReusePlayerID    = iDormant,
+            Mode             = sMode,
+            -- reuse（真·原生城邦）与 dynamic（实测正确的全新建玩家）都机制完整；
+            -- retarget 是半成品，**不谎报为"完整"**。
+            CanReceiveInfluence = (sMode == "reuse" or sMode == "dynamic"),
+        };
+    end
+
+    print("[CSF] foundable city-states = " .. tostring(#tOut) ..
+          " (domain=" .. tostring(sDomain) ..
+          ", 本局已有同文明休眠玩家 = " .. tostring(iDormantCount) ..
+          " 个；retarget=" .. tostring(CSF_ALLOW_RETARGET) ..
+          " dynamic=" .. tostring(CSF_ENABLE_DYNAMIC_CREATION) .. ")");
+    return tOut;
+end
+
+-- 查某文明的领袖。
+--
+-- ⚠️⚠️ 实测关键（T-89）：**不能**用 `GameInfo.CivilizationLeaders[civ]` 直接索引！
+--     它是 userdata，直接索引**返回 nil**（实测 CIVILIZATION_ARMAGH / KANDY 都查不到）。
+--     把 nil 领袖传给 `SetPlayerLeader` 会让引擎 **空指针崩溃**
+--     （`EXCEPTION_ACCESS_VIOLATION` / `Error reading address 0x970`，实测崩过两次）。
+--     —— 这才是前两次崩溃的真凶，跟"等级字符串"无关（T-90 修正）。
+--
+-- ✅ 正确做法：**遍历** `GameInfo.CivilizationLeaders()` 逐行比对 CivilizationType
+--     （实测迭代 141 行、能正确匹配到 LEADER_MINOR_CIV_*）。
+--     兜底：按命名规律推导 `CIVILIZATION_X -> LEADER_MINOR_CIV_X`，
+--     并用 `GameInfo.Leaders[推导值] ~= nil` 验证存在性后才采用。
+local function CSF_GetLeaderForCiv(sCiv)
+    if sCiv == nil or sCiv == "" then return nil end
+
+    -- ① 遍历匹配（主要途径）
+    local sLeader = nil;
+    pcall(function()
+        for row in GameInfo.CivilizationLeaders() do
+            if row.CivilizationType == sCiv then
+                sLeader = row.LeaderType;
+            end
+        end
+    end);
+    if sLeader ~= nil and sLeader ~= "" then return sLeader end
+
+    -- ② 命名规律 + 存在性验证（兜底）
+    local sGuess = "LEADER_MINOR_CIV_" .. string.gsub(sCiv, "^CIVILIZATION_", "");
+    local kLeader = nil;
+    pcall(function() kLeader = GameInfo.Leaders[sGuess] end);
+    if kLeader ~= nil then return sGuess end
+
+    -- ③ 都不行 → 返回 nil（调用方必须中止，绝不能把 nil 传给引擎）
+    return nil;
+end
+
+-- ⚠️ 安全底线：绝不操作预分配槽（状态 5）——实测会让游戏崩溃（T-81）
+local function CSF_SlotStatus(iSlot)
+    local pm = WorldBuilder and WorldBuilder.PlayerManager and WorldBuilder.PlayerManager() or nil;
+    if pm == nil then return nil end
+    local st = nil;
+    pcall(function() st = pm:GetSlotStatus(iSlot) end);
+    return st;
+end
+
+-- 【动态创建（AddPlayer）】开关见文件顶部配置区（必须在所有使用点之前定义）。
+-- ⚠️ 注意：`CSF_ALLOW_OWN_TERRITORY` 必须在使用它的函数【之前】定义，
+--    否则 Lua 读到的是全局 nil（开关会失效）。定义见文件上方配置区。
+
+-- 【混合建邦】按文明建邦：
+--   返回 (ok, reason, iCityStatePlayerID, bFullMechanics)
+--
+--   三级策略（从最安全到最有风险）：
+--     ①【复用】本局已有的休眠同文明玩家  —— 最安全，机制完整
+--     ②【重定向】把本局【任意一个】休眠城邦玩家改成目标文明 —— 同样安全！
+--        关键洞察：`SetPlayerLeader` 可以作用在**已存在的玩家**上，
+--        而被改的玩家是引擎【完整初始化】过的（等级=CITY_STATE、颜色、队伍、国库都对），
+--        因此完全没有 `AddPlayer` 那种"半成品玩家"的问题。
+--        → 相当于把"8 个固定城邦"变成"48 选 8"，且只用已验证的 API。
+--     ③【新建】AddPlayer 动态创建 —— 兜底；仅当上面两条都用尽时才走，
+--        且受 CSF_ENABLE_DYNAMIC_CREATION 开关控制。
+local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
+    if sCiv == nil or iX == nil or iY == nil then
+        return false, "bad_args";
+    end
+
+    -- 先把【本局所有休眠城邦玩家】列出来（0 城 = 还没建城）
+    --   ⚠️ 同样要排除【已派出移民、待建城】的（T-124，防重复建邦）
+    local tDormant = {};
+    local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    for _, iPlayer in ipairs(tIDs) do
+        local pPlayer = Players[iPlayer];
+        if pPlayer ~= nil then
+            local iCities = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
+            if iCities == 0 then
+                local bOnMap = false;
+                CSF_Safe(function()
+                    for _, pUnit in pPlayer:GetUnits():Members() do
+                        local x = pUnit:GetX();
+                        local y = pUnit:GetY();
+                        if x ~= nil and y ~= nil and x >= 0 and y >= 0 then
+                            bOnMap = true;
+                            break;
+                        end
+                    end
+                end);
+                if not bOnMap then
+                    local sThis = CSF_Safe(function()
+                        return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
+                    end);
+                    tDormant[#tDormant + 1] = { ID = iPlayer, Civ = sThis };
+                end
+            end
+        end
+    end
+    print("[CSF] city-state strategy: " .. tostring(#tDormant) .. " dormant player(s) available");
+
+    -- ①【复用】同文明的休眠玩家
+    local iReuse = nil;
+    for _, k in ipairs(tDormant) do
+        if k.Civ == sCiv and iReuse == nil then iReuse = k.ID end
+    end
+
+    -- ②【重定向】任意一个休眠玩家 → 改成目标文明
+    --    ⚠️⚠️ 默认【关闭】！实测证明这条路径会造出半成品城邦
+    --        （颜色不对、宗主加成不生效、UI 名字是旧名），且出现过引擎级崩溃。
+    --        详见文件下方 CSF_ALLOW_RETARGET 的说明（T-109）。
+    if iReuse == nil and #tDormant > 0 and CSF_ALLOW_RETARGET then
+        local pm = WorldBuilder and WorldBuilder.PlayerManager and WorldBuilder.PlayerManager() or nil;
+        local sLeader = CSF_GetLeaderForCiv(sCiv);
+        if pm ~= nil and sLeader ~= nil then
+            local kVictim  = tDormant[1];
+            local sOldCiv    = kVictim.Civ;
+            local sOldLeader = CSF_Safe(function()
+                return PlayerConfigurations[kVictim.ID]:GetLeaderTypeName();
+            end);
+            print("[CSF] retarget: 把休眠城邦玩家 " .. tostring(kVictim.ID) ..
+                  "（原为 " .. tostring(sOldCiv) .. "）改成 " .. tostring(sCiv));
+
+            local bSet = pcall(function()
+                pm:SetPlayerLeader(kVictim.ID, sLeader, sCiv, "CIVILIZATION_LEVEL_CITY_STATE");
+            end);
+
+            -- ⚠️ 复查【文明 + 领袖 + 等级】三项，任何一项不对就【回滚】。
+            --    理由：SetPlayerLeader 若只改了一半，玩家会处于不一致状态，
+            --    后续引擎处理时可能出问题。宁可完全还原，也不留半成品。
+            local sNowCiv    = CSF_Safe(function()
+                return PlayerConfigurations[kVictim.ID]:GetCivilizationTypeName();
+            end);
+            local sNowLeader = CSF_Safe(function()
+                return PlayerConfigurations[kVictim.ID]:GetLeaderTypeName();
+            end);
+            local sNowLevel  = CSF_Safe(function()
+                return PlayerConfigurations[kVictim.ID]:GetCivilizationLevelTypeName();
+            end);
+            print("[CSF] retarget result: civ=" .. tostring(sNowCiv) ..
+                  " leader=" .. tostring(sNowLeader) .. " level=" .. tostring(sNowLevel));
+
+            local bConsistent = bSet
+                                and sNowCiv == sCiv
+                                and sNowLeader == sLeader
+                                and sNowLevel == "CIVILIZATION_LEVEL_CITY_STATE";
+
+            if bConsistent then
+                iReuse = kVictim.ID;
+            else
+                print("[CSF] retarget 结果不一致 → 尝试回滚到原文明 " .. tostring(sOldCiv));
+                if sOldCiv ~= nil and sOldLeader ~= nil then
+                    local bBack = pcall(function()
+                        pm:SetPlayerLeader(kVictim.ID, sOldLeader, sOldCiv,
+                                           "CIVILIZATION_LEVEL_CITY_STATE");
+                    end);
+                    local sBack = CSF_Safe(function()
+                        return PlayerConfigurations[kVictim.ID]:GetCivilizationTypeName();
+                    end);
+                    print("[CSF] rollback ok=" .. tostring(bBack) .. " civ=" .. tostring(sBack));
+                else
+                    print("[CSF] 回滚信息不足（原文明/领袖读不到），跳过回滚");
+                end
+            end
+        end
+    end
+
+    if iReuse ~= nil then
+        print("[CSF] reuse dormant city-state player " .. tostring(iReuse) .. " for " .. tostring(sCiv));
+
+        -- ⭐⭐ 新方案（T-123）：**不调用 `Cities:Create`，改为把该城邦的移民放到目标格，
+        --    让城邦自己的 AI 建城**。
+        --    为什么：`Create` 在间距/地形不满足时会【静默失败】并**永久损坏该城邦**
+        --    （实测 `AliveMinors` 9→8→…、`canInf` 变 false）。而"放移民让它自建"
+        --    由引擎完成建城 —— **不会失败、不会损坏、机制全对**。
+        --
+        --    ⚠️ 顺序关键：**必须先解除预留标记**，否则 `Events.UnitAddedToMap`
+        --       会把刚放上去的移民当成"溜回地图的预留单位"立刻杀掉（实测踩到）。
+        if m_tReserved[iReuse] then
+            m_tReserved[iReuse] = nil;
+            print("[CSF] un-reserved city-state " .. tostring(iReuse) .. " before settling");
+        end
+
+        local bUnit = pcall(function()
+            UnitManager.InitUnit(iReuse, "UNIT_SETTLER", iX, iY);
+        end);
+        print("[CSF] settle: placed settler of player " .. tostring(iReuse) ..
+              " at (" .. tostring(iX) .. "," .. tostring(iY) .. ") ok=" .. tostring(bUnit));
+
+        if not bUnit then
+            -- 放不上去 → 恢复预留标记，避免它变成"会乱跑"的城邦
+            m_tReserved[iReuse] = true;
+            return false, "settler_failed", iReuse, true;
+        end
+
+        -- 消耗掉用来建邦的「建邦使节」
+        CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+
+        print("[CSF] settle: 城邦 " .. tostring(iReuse) ..
+              " 的移民已就位，将在它的回合自行建城");
+        return true, "ok", iReuse, true;        -- bFullMechanics = true
+    end
+
+    -- ★ 兜底：动态创建（AddPlayer）——默认【关闭】，见上方开关说明
+    if not CSF_ENABLE_DYNAMIC_CREATION then
+        -- 走到这里说明：既没有同文明休眠玩家、也没有【任何】可重定向的休眠玩家
+        -- → 用 `no_free_slot` 让面板提示"名额已用完"（对玩家更有意义，
+        --   比"动态建邦已被关闭"这种技术说法清楚）
+        print("[CSF] 没有可用的休眠城邦玩家了，且 AddPlayer 兜底已关闭；无法建立 " ..
+              tostring(sCiv));
+        return false, "no_free_slot";
+    end
+
+    -- ⚠️⚠️ 顺序关键：**先验证地点，再创建玩家**！
+    --    原实现在验证之前就 AddPlayer，地点不合法时（例如站在别人领土上）
+    --    会留下一个"活着但没有城"的【孤儿玩家】，反复点击会累积多个，
+    --    卡在引擎里导致后续崩溃（实测踩到：连点两次留下玩家 54/55 后崩游戏）。
+    local bPreValid, sPreReason = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+    if not bPreValid then
+        print("[CSF] dynamic: 地点不合法（" .. tostring(sPreReason) ..
+              "），【未创建玩家】—— 请换个位置再试");
+        return false, sPreReason;
+    end
+
+    -- ① 复用之前失败留下的同文明玩家（避免重复创建孤儿）
+    if m_tOrphan[sCiv] ~= nil then
+        local iOrphan = m_tOrphan[sCiv];
+        local pOrphan = Players[iOrphan];
+        if pOrphan ~= nil then
+            local iC = CSF_Safe(function() return pOrphan:GetCities():GetCount() end) or 0;
+            if iC == 0 then
+                print("[CSF] dynamic: reuse previously created orphan player " ..
+                      tostring(iOrphan) .. " for " .. tostring(sCiv));
+                local bOk2, sReason2 = CSF_FoundCityState(iOrphan, iX, iY, iUnitID, iOwnerID);
+                if bOk2 == true then m_tOrphan[sCiv] = nil end
+                return bOk2, sReason2, iOrphan, true;
+            end
+        end
+        m_tOrphan[sCiv] = nil;
+    end
+
+    local pm = WorldBuilder and WorldBuilder.PlayerManager and WorldBuilder.PlayerManager() or nil;
+    if pm == nil then
+        return false, "no_worldbuilder";
+    end
+
+    -- ⚠️ 领袖必须查得到！传 nil 会让引擎空指针崩溃（T-89）
+    local sLeader = CSF_GetLeaderForCiv(sCiv);
+    if sLeader == nil then
+        print("[CSF] dynamic: no leader found for " .. tostring(sCiv) .. " -> abort");
+        return false, "no_leader";
+    end
+
+    -- ⚠️⚠️⚠️ 【关键】先释放一个"引擎/UI 认识的槽"，再让 AddPlayer 拿回它（T-114）。
+    --
+    --   为什么要这样：`AddPlayer` 若拿到一个【全新槽】（54–61），那个槽
+    --   **不在 UI 的颜色表里** —— 实测 `UI.GetPlayerColors(54)` 返回 `nil`，
+    --   于是旗帜取不到颜色，并触发 `CityBannerManager: Called SetColor with nil value`。
+    --
+    --   而 `UninitializePlayer(某个休眠城邦槽)` 释放出来的槽，**会被随后的
+    --   `AddPlayer` 重新拿到**（实测：释放 6 → AddPlayer 返回 6）。那些槽是
+    --   **开局就存在**的，UI 的颜色表认识它们 —— 实测复用后
+    --   `UI.GetPlayerColors(6)` 正常返回颜色，且 `SetColor nil` 警告消失。
+    --
+    --   注意：被释放的城邦**本来就是我们挑中的那个目标槽**（0 城、休眠中），
+    --         所以不会额外损失本局的城邦。
+    --   ⭐ 优先挑【同类别】的休眠槽 —— 因为 UI 的 front 颜色是【按城邦类别】给的
+    --      （实测 6 个不同 front 值对应 6 个类别），同类别才能拿到正确颜色。
+    local sTargetCat = nil;
+    do
+        local tRows = CSF_Safe(function()
+            return DB.ConfigurationQuery(
+                "SELECT CivilizationType, CityStateCategory FROM CityStates");
+        end);
+        if type(tRows) == "table" then
+            local tCat = {};
+            for _, r in ipairs(tRows) do
+                if r.CivilizationType ~= nil then tCat[r.CivilizationType] = r.CityStateCategory end
+            end
+            sTargetCat = tCat[sCiv];
+            -- 给每个休眠槽标上类别
+            for _, k in ipairs(tDormant) do k.Cat = tCat[k.Civ] end
+        end
+    end
+    print("[CSF] dynamic: 目标类别 = " .. tostring(sTargetCat));
+
+    local iRecycled = nil;
+    -- 先找同类别的
+    for _, k in ipairs(tDormant) do
+        if iRecycled == nil and sTargetCat ~= nil and k.Cat == sTargetCat then
+            if pcall(function() pm:UninitializePlayer(k.ID) end) then iRecycled = k.ID end
+        end
+    end
+    -- 没有同类别的再退而求其次
+    if iRecycled == nil then
+        for _, k in ipairs(tDormant) do
+            if iRecycled == nil then
+                if pcall(function() pm:UninitializePlayer(k.ID) end) then iRecycled = k.ID end
+            end
+        end
+    end
+    if iRecycled ~= nil then
+        print("[CSF] dynamic: recycled dormant slot " .. tostring(iRecycled) ..
+              " —— 这样新玩家才在 UI 颜色表里");
+    end
+
+    local iNew = nil;
+    pcall(function() iNew = pm:AddPlayer(true) end);
+    if iNew == nil or iNew == -1 then
+        print("[CSF] dynamic: AddPlayer failed (空槽可能已用尽，上限 8 个)");
+        return false, "no_free_slot";
+    end
+    if iRecycled ~= nil and iNew ~= iRecycled then
+        print("[CSF] dynamic: NOTE 拿到的槽 " .. tostring(iNew) ..
+              " 不同于释放的槽 " .. tostring(iRecycled) .. "（颜色可能仍缺失）");
+    end
+
+    -- ⚠️⚠️ 第 4 参数【必须传等级字符串 "CIVILIZATION_LEVEL_CITY_STATE"】！
+    --     · 不传 / 传数字 → 新玩家等级为 **nil** → `CanReceiveInfluence=false`（实测）
+    --     · 传字符串       → 等级为 CITY_STATE → **canInf=true**（实测验证通过）
+    --     · 之前以为"传字符串会崩"，其实崩溃是【领袖为 nil】导致的（T-89/T-90 修正）
+    --
+    --   ⭐⭐ 顺序很关键（实测验证 T-111）：**先 SetPlayerLeader，再补起始位置**。
+    --      这样引擎是在【文明已设定好之后】才把玩家补全，于是颜色 / 名字 / 特性
+    --      都按【新文明】生成 —— 实测 color 与原生城邦一样是独立且正确的值。
+    local bSet = pcall(function()
+        pm:SetPlayerLeader(iNew, sLeader, sCiv, "CIVILIZATION_LEVEL_CITY_STATE");
+    end);
+    if not bSet then
+        return false, "set_leader_failed";
+    end
+
+    -- ⚠️ 补一个「起始位置」。
+    --    DLL 明确提示：**"Players without start positions will be removed."**
+    --    —— 引擎会移除"没有起始位置的玩家"。`AddPlayer` 造出的玩家没有位置，
+    --    补上之后实测 `inited=true / alive=true`，玩家才算真正完整。
+    local bPos = pcall(function() pm:SetRandomMinorStartingPosition(iNew) end);
+    print("[CSF] dynamic: SetRandomMinorStartingPosition(" .. tostring(iNew) ..
+          ") ok=" .. tostring(bPos));
+
+    -- 复查文明是否设上
+    local sGot = CSF_Safe(function()
+        return PlayerConfigurations[iNew]:GetCivilizationTypeName();
+    end);
+    if sGot ~= sCiv then
+        print("[CSF] dynamic: civ not applied (got " .. tostring(sGot) .. ")");
+        return false, "civ_mismatch";
+    end
+
+    print("[CSF] dynamic: created player " .. tostring(iNew) .. " as " .. tostring(sCiv) ..
+          " (level=CITY_STATE, 可接收使者)");
+
+    local bOk, sReason = CSF_FoundCityState(iNew, iX, iY, iUnitID, iOwnerID);
+    if bOk ~= true then
+        -- ⚠️ 建城失败（例如 Create 静默失败）→ 玩家已经建出来了，**登记为孤儿**。
+        --    下次建同一文明时复用它，绝不再 AddPlayer 一个（避免累积导致崩溃）。
+        m_tOrphan[sCiv] = iNew;
+        print("[CSF] dynamic: 建城失败(" .. tostring(sReason) ..
+              ")，玩家 " .. tostring(iNew) .. " 已登记为孤儿，下次复用");
+    else
+        m_tOrphan[sCiv] = nil;
+    end
+    return bOk, sReason, iNew, true;            -- 等级已验证 = CITY_STATE，机制完整
+end
+
+-- ---------------------------------------------------------------------------
+-- ⑨ 【延迟执行】UI 只下单，GameCore 在游戏事件里执行
+--
+--    为什么要这样（实测教训 T-94）：
+--      `AddPlayer` / `SetPlayerLeader` / `Cities:Create` 都是**改变引擎玩家/城市结构**
+--      的重操作。如果直接在 **UI 按钮回调的调用栈内**执行，引擎此刻可能正在遍历
+--      相关数据，结构被改动 → 崩溃（实测：日志停在 `dynamic: created player 54`
+--      之后、`CSF_FoundCityState` 内部，界面上弹出异常框）。
+--      对照实验证明：同样的函数在 tuner 上下文、在 `InGame` UI 状态里单独调用都**正常**，
+--      只有"在 UI 回调栈内"会崩 —— 所以这是**调用时机问题，不是参数问题**。
+--
+--    做法：UI 调 `RequestFound(...)` 只把请求放进队列；
+--          GameCore 在 `Events.GameCoreEventPublishComplete` 里取出来执行。
+--          执行结果用 `GameEvents.CSF_FoundResult` 广播回 UI。
+-- ---------------------------------------------------------------------------
+local m_tPending = {};      -- 待处理的建邦请求队列
+local m_kLastResult = nil;  -- 最后一次执行结果（供 UI 轮询兜底读取）
+local m_iResultSeq  = 0;    -- 结果序号（UI 用来判断"有没有新结果"）
+
+local function CSF_RequestFound(sCiv, iX, iY, iUnitID, iOwnerID)
+    if sCiv == nil or iX == nil or iY == nil then
+        return false;
+    end
+    m_tPending[#m_tPending + 1] = {
+        Civ = sCiv, X = iX, Y = iY, UnitID = iUnitID, OwnerID = iOwnerID,
+    };
+    print("[CSF] queued found request: " .. tostring(sCiv) .. " at (" ..
+          tostring(iX) .. "," .. tostring(iY) .. ") unit=" .. tostring(iUnitID) ..
+          " owner=" .. tostring(iOwnerID));
+    return true;
+end
+
+-- 处理队列（在游戏事件里跑，**不在 UI 回调栈内**）
+local function CSF_ProcessPending()
+    if #m_tPending == 0 then return end
+    local tBatch = m_tPending;
+    m_tPending = {};
+
+    for _, kReq in ipairs(tBatch) do
+        print("[CSF] processing queued request: " .. tostring(kReq.Civ) ..
+              " at (" .. tostring(kReq.X) .. "," .. tostring(kReq.Y) .. ")");
+        local bOk, sReason, iCs, bFull = false, "not_run", nil, false;
+        local okCall = pcall(function()
+            bOk, sReason, iCs, bFull =
+                CSF_FoundCityStateByCiv(kReq.Civ, kReq.X, kReq.Y, kReq.UnitID, kReq.OwnerID);
+        end);
+        if not okCall then
+            sReason = "threw";
+            print("[CSF] ERROR: 建邦调用抛异常（已捕获，未崩游戏）");
+        end
+        print("[CSF] queued request result: ok=" .. tostring(bOk) ..
+              " reason=" .. tostring(sReason) .. " player=" .. tostring(iCs));
+        -- 存下最后结果（UI 轮询兜底用；因为某些 UI 上下文里 GameEvents 为 nil）
+        m_iResultSeq = m_iResultSeq + 1;
+        m_kLastResult = {
+            Seq = m_iResultSeq,
+            Ok = (bOk == true),
+            Reason = tostring(sReason),
+            Player = iCs or -1,
+            X = kReq.X, Y = kReq.Y,
+        };
+        -- 广播回 UI（GameEvents 跨 VM；拿不到就靠上面的轮询兜底）
+        pcall(function()
+            GameEvents.CSF_FoundResult(bOk == true, tostring(sReason),
+                                       iCs or -1, kReq.X, kReq.Y);
+        end);
+    end
+end
+
+-- 取最后一次结果（UI 轮询用）。返回 (seq, ok, reason, player, x, y)
+local function CSF_GetLastResult()
+    if m_kLastResult == nil then
+        return 0, false, "none", -1, -1, -1;
+    end
+    return m_kLastResult.Seq, m_kLastResult.Ok, m_kLastResult.Reason,
+           m_kLastResult.Player, m_kLastResult.X, m_kLastResult.Y;
+end
+
+Events.GameCoreEventPublishComplete.Add(function()
+    pcall(CSF_ProcessPending);
+end);
+
+-- ---------------------------------------------------------------------------
+-- 跨 VM 桥：暴露给 UI 上下文
+--   （UI 与 GameCore 是两个 Lua VM，LuaEvents/GameEvents 不跨 VM）
+-- ---------------------------------------------------------------------------
+ExposedMembers.CSF = ExposedMembers.CSF or {};
+ExposedMembers.CSF.FoundCityState      = CSF_FoundCityState;
+ExposedMembers.CSF.IsValidLocation     = CSF_IsValidFoundLocation;
+ExposedMembers.CSF.GetPool             = CSF_GetCityStatePool;
+ExposedMembers.CSF.GetDormantCityStates = CSF_GetDormantCityStates;
+ExposedMembers.CSF.ForceReserve        = CSF_ForceReserve;
+ExposedMembers.CSF.IsReserved          = CSF_IsReserved;
+ExposedMembers.CSF.CountEnvoys         = CSF_CountEnvoys;
+ExposedMembers.CSF.MaxEnvoysPerPlayer  = CSF_MAX_ENVOYS_PER_PLAYER;
+-- 【混合方案】
+ExposedMembers.CSF.GetFoundableCityStates = CSF_GetFoundableCityStates;
+ExposedMembers.CSF.FoundCityStateByCiv    = CSF_FoundCityStateByCiv;
+ExposedMembers.CSF.GetLeaderForCiv        = CSF_GetLeaderForCiv;
+-- 【延迟执行】UI 用这个下单
+ExposedMembers.CSF.RequestFound           = CSF_RequestFound;
+-- 【结果轮询兜底】某些 UI 上下文里 GameEvents 为 nil，UI 可改用它主动拉结果
+ExposedMembers.CSF.GetLastResult          = CSF_GetLastResult;
+
+print("[CSF] CSF_Gameplay.lua ready; ExposedMembers.CSF bound" ..
+      " (max envoys per player = " .. tostring(CSF_MAX_ENVOYS_PER_PLAYER) .. ")");

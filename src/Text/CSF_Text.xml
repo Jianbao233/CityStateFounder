@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GameData>
+  <LocalizedText>
+    <Replace Tag="LOC_CSF_MOD_NAME" Language="zh_Hans_CN">
+      <Text>城邦缔造者</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_MOD_NAME" Language="en_US">
+      <Text>City-State Founder</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_MOD_DESCRIPTION" Language="zh_Hans_CN">
+      <Text>新增「建邦使节」单位：它不能建立普通城市，而是建立一个城邦。配套面板会列出本存档休眠中的城邦（图标 / 名称 / 宗主加成）供你选择。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_MOD_DESCRIPTION" Language="en_US">
+      <Text>Adds the City-State Envoy unit, which cannot found a normal city but instead founds a City-State. A panel lists the dormant City-States of this save (icon / name / suzerain bonus) for you to choose from.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_MOD_TEASER" Language="zh_Hans_CN">
+      <Text>让玩家亲手把城邦放上地图。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_MOD_TEASER" Language="en_US">
+      <Text>Let the player place City-States on the map.</Text>
+    </Replace>
+    <Replace Tag="LOC_UNIT_CSF_ENVOY_NAME" Language="zh_Hans_CN">
+      <Text>建邦使节</Text>
+    </Replace>
+    <Replace Tag="LOC_UNIT_CSF_ENVOY_NAME" Language="en_US">
+      <Text>City-State Envoy</Text>
+    </Replace>
+    <Replace Tag="LOC_UNIT_CSF_ENVOY_DESCRIPTION" Language="zh_Hans_CN">
+      <Text>无法建立普通城市。可在所在位置建立一个城邦。</Text>
+    </Replace>
+    <Replace Tag="LOC_UNIT_CSF_ENVOY_DESCRIPTION" Language="en_US">
+      <Text>Cannot found a normal city. Can found a City-State at its current location.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_ACTION_FOUND_CITY_STATE" Language="zh_Hans_CN">
+      <Text>建立城邦</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_ACTION_FOUND_CITY_STATE" Language="en_US">
+      <Text>Found City-State</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_ACTION_FOUND_CITY_STATE_TT" Language="zh_Hans_CN">
+      <Text>在当前位置建立一个城邦。城邦由 AI 独立接管，不属于你。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_ACTION_FOUND_CITY_STATE_TT" Language="en_US">
+      <Text>Found a City-State at the current location. It is independently controlled by the AI and does not belong to you.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_TITLE" Language="zh_Hans_CN">
+      <Text>选择要建立的城邦</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_TITLE" Language="en_US">
+      <Text>Choose a City-State to Found</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_HINT" Language="zh_Hans_CN">
+      <Text>选择一个城邦，它将在使节所在位置诞生。列表只显示本局可用的城邦。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_HINT" Language="en_US">
+      <Text>Select a City-State to found at the Envoy's location. Only City-States present in this game are listed.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_PRE" Language="zh_Hans_CN">
+      <Text>本局可建</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_PRE" Language="en_US">
+      <Text>Available:</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_MID" Language="zh_Hans_CN">
+      <Text>个 · 本局共</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_MID" Language="en_US">
+      <Text>of</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_SUF" Language="zh_Hans_CN">
+      <Text>个城邦（由开局设置决定；想更多请在开局设置里提高城邦数量）</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_SUF" Language="en_US">
+      <Text>City-States in this game (raise the count in game setup for more)</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_CONFIRM" Language="zh_Hans_CN">
+      <Text>建立</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_CONFIRM" Language="en_US">
+      <Text>Found</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_CANCEL" Language="zh_Hans_CN">
+      <Text>取消</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_CANCEL" Language="en_US">
+      <Text>Cancel</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_DYNAMIC_WARN" Language="zh_Hans_CN">
+      <Text>（新建城邦，占一个创建名额）</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_DYNAMIC_WARN" Language="en_US">
+      <Text>(new City-State; uses one of 8 creation slots)</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_PENDING" Language="zh_Hans_CN">
+      <Text>已提交，城邦的移民正在就位……</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_PENDING" Language="en_US">
+      <Text>Submitting... the City-State's Settler is moving in</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_FOUND_FAIL" Language="zh_Hans_CN">
+      <Text>建立失败：</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_FOUND_FAIL" Language="en_US">
+      <Text>Failed to found:</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_FOUND_OK" Language="zh_Hans_CN">
+      <Text>城邦的移民已就位，它会在自己的回合建城。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_FOUND_OK" Language="en_US">
+      <Text>The City-State's Settler is in place; it will found its city on its turn.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_CONFIRM_ASK" Language="zh_Hans_CN">
+      <Text>确定要在此建立该城邦吗？此操作不可撤销。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_CONFIRM_ASK" Language="en_US">
+      <Text>Found this City-State here? This cannot be undone.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_WATER" Language="zh_Hans_CN">
+      <Text>水域不能建邦，请移到陆地上。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_WATER" Language="en_US">
+      <Text>Cannot found on water — move to land.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_OWNED_OWN" Language="zh_Hans_CN">
+      <Text>该地块属于你自己的领土，请把建邦使节移到【无主地】再试。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_OWNED_OWN" Language="en_US">
+      <Text>That plot is inside your own borders — move the Envoy to unclaimed land.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_OWNED_OTHER" Language="zh_Hans_CN">
+      <Text>该地块属于其他文明的领土，请移到【无主地】再试。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_OWNED_OTHER" Language="en_US">
+      <Text>That plot belongs to another civilization — move to unclaimed land.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_OWNED_NOT_CLEARED" Language="zh_Hans_CN">
+      <Text>无法解除该地块归属，建邦已取消（避免出错）。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_OWNED_NOT_CLEARED" Language="en_US">
+      <Text>Could not clear the plot's owner; founding cancelled to stay safe.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_TOO_CLOSE" Language="zh_Hans_CN">
+      <Text>离已有城市太近，请换个位置。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_TOO_CLOSE" Language="en_US">
+      <Text>Too close to an existing city — pick another spot.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_MAP_EDGE" Language="zh_Hans_CN">
+      <Text>太靠近地图边缘，请往里挪几格。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_MAP_EDGE" Language="en_US">
+      <Text>Too close to the map edge — move a few tiles inland.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_LITTLE_LAND" Language="zh_Hans_CN">
+      <Text>周围陆地太少，无法建城，请换个位置。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_LITTLE_LAND" Language="en_US">
+      <Text>Not enough surrounding land to found a city here.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_SLOT" Language="zh_Hans_CN">
+      <Text>本局可用于建邦的休眠城邦名额已用完（每局约 8 个）。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_SLOT" Language="en_US">
+      <Text>No dormant City-State slots left this game (about 8 per game).</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_LEADER" Language="zh_Hans_CN">
+      <Text>查不到该城邦的领袖，无法建立。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_LEADER" Language="en_US">
+      <Text>Could not resolve that City-State's leader.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_WB" Language="zh_Hans_CN">
+      <Text>当前环境不支持新建城邦。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_WB" Language="en_US">
+      <Text>This environment does not support creating City-States.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_SILENT" Language="zh_Hans_CN">
+      <Text>引擎拒绝了在此建城（通常是距离太近），请换个位置。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_SILENT" Language="en_US">
+      <Text>The engine refused this spot (usually too close) — pick another.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_CREATE_THREW" Language="zh_Hans_CN">
+      <Text>建城调用失败，请换个位置。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_CREATE_THREW" Language="en_US">
+      <Text>City creation failed — try another spot.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_DISABLED" Language="zh_Hans_CN">
+      <Text>动态建邦已被关闭。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_DISABLED" Language="en_US">
+      <Text>Dynamic creation is disabled.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_THREW" Language="zh_Hans_CN">
+      <Text>建邦过程出错（已安全中止，未影响游戏）。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_THREW" Language="en_US">
+      <Text>An error occurred (safely aborted).</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_BAD_ARGS" Language="zh_Hans_CN">
+      <Text>参数不完整。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_BAD_ARGS" Language="en_US">
+      <Text>Missing arguments.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_PLOT" Language="zh_Hans_CN">
+      <Text>目标地块无效。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_NO_PLOT" Language="en_US">
+      <Text>Invalid target plot.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_ALREADY_PRESENT" Language="zh_Hans_CN">
+      <Text>已在场上</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_ALREADY_PRESENT" Language="en_US">
+      <Text>Already present</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_INVALID_LOCATION" Language="zh_Hans_CN">
+      <Text>此处无法建立城邦（距离其他城市太近或地形不允许）。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_INVALID_LOCATION" Language="en_US">
+      <Text>Cannot found a City-State here (too close to another city, or invalid terrain).</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_NO_POOL" Language="zh_Hans_CN">
+      <Text>当前没有休眠中的城邦可供建立。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_NO_POOL" Language="en_US">
+      <Text>No dormant City-States are available to found.</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_SUFFIX_2" Language="zh_Hans_CN">
+      <Text> II</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_SUFFIX_2" Language="en_US">
+      <Text> II</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_SUFFIX_3" Language="zh_Hans_CN">
+      <Text> III</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_SUFFIX_3" Language="en_US">
+      <Text> III</Text>
+    </Replace>
+  </LocalizedText>
+</GameData>
