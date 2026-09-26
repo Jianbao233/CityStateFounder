@@ -57,9 +57,6 @@
          所以 CSF_MapSizes.sql 目前保持【不修改任何值】，避免留下"以为改了其实没改"的假象。
          真要放开提高城邦数量，请先确认配置库恢复正常（见该 sql 文件里的步骤）。 -->
     <UpdateDatabase id="CSF_MapSizes">
-      <Properties>
-        <LoadOrder>222222</LoadOrder>
-      </Properties>
       <File>Data/CSF_MapSizes.sql</File>
     </UpdateDatabase>
     <!-- ⭐ 单位图标（复用开拓者的图）—— 照官方 Australia.modinfo:36 的写法 -->
@@ -126,6 +123,13 @@
   <Files>
     <File>Data/CSF_Icons.xml</File>
     <File>Data/CSF_MapSizes.sql</File>
+    <!-- Data/CSF_MapSizes.xml 是【可选】的"提高城邦数量上限"方案（默认不启用）。
+         要启用：在 FrontEndActions 里加一条 UpdateDatabase 指向它，
+         并把上面那条指向 CSF_MapSizes.sql 的去掉。
+         为什么不默认启用：它会把开局设置里城邦数量滑条的上限抬高，
+         属于改变玩家可选范围的改动，应由玩家自己决定；
+         而且和 CCB Maps 同用时需要先实测地图容量（详见该文件内的说明）。 -->
+    <File>Data/CSF_MapSizes.xml</File>
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>

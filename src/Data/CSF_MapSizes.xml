@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ===========================================================================
+     CityStateFounder / 城邦缔造者 —— 【可选】提高城邦数量上限
+     ===========================================================================
+
+     ⚠️⚠️ 本文件【默认未注册】。要启用，请在 CityStateFounder.modinfo 的
+          FrontEndActions 里加一条：
+
+              UpdateDatabase id="CSF_MapSizes_XML"
+                File: Data/CSF_MapSizes.xml
+
+          并把原来那条指向 Data/CSF_MapSizes.sql 的 CSF_MapSizes 去掉
+          （SQL 版是空操作，两者做的是同一件事）。
+
+     ===========================================================================
+     为什么用 XML 而不是 SQL（T-148 实测）
+     ===========================================================================
+     我们的 SQL 写法（UPDATE MapSizes SET MaxCityStates 等于某值）完全不生效：
+       · Modding.log 显示文件确实被加载了
+         （ModdingUpdateConfigurationDatabase Loading Data/CSF_MapSizes.sql）
+       · 但活库里毫无变化，连【去掉 WHERE、改所有行】都没用
+       · 放 FrontEndActions / InGameActions 都一样；有无 LoadOrder 都一样；
+         有无结尾的 SELECT 1; 都一样
+
+     而 BBM（Better Balanced Maps，工坊 3179425402）用下面这种 XML Replace
+     写的 StandardMapSizes 行确实出现在活库里。
+
+     → **配置库（Configuration）的改动必须走 XML 行操作，SQL UPDATE 不生效。**
+
+     ⚠️ Replace 是【整行替换】，**所有列都必须给全**，漏掉的列会变成 NULL。
+        所以下面每行都照抄官方 Base/Assets/Configuration/Data/MapSizes.xml
+        的每一列，只改动想改的那一列。
+
+     ⚠️ 另注：XML 注释里不能出现连续两个连字符（这是 XML 规范），
+        所以本注释刻意不引用任何带那种符号的代码片段。
+
+     ===========================================================================
+     本文件改了什么
+     ===========================================================================
+     只提高 MaxCityStates（开局设置里城邦数量滑条的【上限】），
+     DefaultCityStates 保持官方原值不动，这样：
+
+       · 开局设置界面的【布局与默认值完全不变】
+       · 只是滑条能拉到更高（可选项变多）
+       · 想要更多休眠城邦的玩家自己往上拉；不拉就还是原版体验
+
+     地图       官方 Max   本文件 Max   官方 Default（不动）
+     决斗            6          10            3
+     极小           10          14            6
+     小             14          18            9
+     标准           18          22           12
+     大             22          26           15
+     巨大           24          28           18
+
+     ===========================================================================
+     ⚠️ 启用前必读：地图容量
+     ===========================================================================
+     城邦数量不能超过地图能提供的出生点。超过时：
+       · 官方地图脚本会优雅跳过（打印 START FAILED MINOR 警告），不会崩
+       · CCB Maps 的脚本会崩：它的分配循环没有退出条件，出生点用完时
+         validspawnsleft 为空数组，取下标得到 nil，紧接着索引 nil 就崩。
+         位置见 BBM_AssignStartingPlots.lua 第 349 到 353 行。
+         官方 AssignStartingPlots.lua 第 216 行则是有上限的循环，并打印警告。
+
+     → 和 CCB Maps 一起用时务必从小幅开始实测（例如先只给标准图加 2）。
+       下面给的加 4 是保守值，不是保证值。
+
+     ===========================================================================
+     和本模组开关的配合
+     ===========================================================================
+         可建数量 = 本局城邦总数 T 减去 地图上保留数 N
+         T 由开局设置滑条决定（本文件抬高它的上限）
+         N 由 CSF_KEEP_ACTIVE_ON_MAP 决定（默认 -2，即按 CSF_KEEP_ACTIVE_PERCENT 50%）
+
+     想要"地图观感与原版一致 + 多出来的全部可建"：
+       1. 开局【高级设置 到 城邦选择器】：勾一个较大的候选池
+          （官方支持选超过数量的条目，只要求下限）
+       2. 城邦数量滑条：拉到本文件抬高后的上限
+       3. CSF_KEEP_ACTIVE_ON_MAP 设成官方 DefaultCityStates 的数值
+          （决斗 3 / 极小 6 / 小 9 / 标准 12 / 大 15 / 巨大 18）
+     =========================================================================== -->
+<GameInfo>
+  <MapSizes>
+
+    <!-- 官方原值（照抄自 Base/Assets/Configuration/Data/MapSizes.xml）
+         DUEL     2/4/2   0/6/3   10
+         TINY     2/6/4   0/10/6  20
+         SMALL    2/10/6  0/14/9  30
+         STANDARD 2/14/8  0/18/12 40
+         LARGE    2/16/10 0/22/15 50
+         HUGE     2/20/12 0/24/18 60
+         下面只把 MaxCityStates 抬高，其余列原样照抄 -->
+
+    <Replace Domain="StandardMapSizes" MapSizeType="MAPSIZE_DUEL"
+             Name="LOC_MAPSIZE_DUEL_NAME" Description="LOC_MAPSIZE_DUEL_DESCRIPTION"
+             MinPlayers="2" MaxPlayers="4" DefaultPlayers="2"
+             MinCityStates="0" MaxCityStates="10" DefaultCityStates="3"
+             SortIndex="10"/>
+
+    <Replace Domain="StandardMapSizes" MapSizeType="MAPSIZE_TINY"
+             Name="LOC_MAPSIZE_TINY_NAME" Description="LOC_MAPSIZE_TINY_DESCRIPTION"
+             MinPlayers="2" MaxPlayers="6" DefaultPlayers="4"
+             MinCityStates="0" MaxCityStates="14" DefaultCityStates="6"
+             SortIndex="20"/>
+
+    <Replace Domain="StandardMapSizes" MapSizeType="MAPSIZE_SMALL"
+             Name="LOC_MAPSIZE_SMALL_NAME" Description="LOC_MAPSIZE_SMALL_DESCRIPTION"
+             MinPlayers="2" MaxPlayers="10" DefaultPlayers="6"
+             MinCityStates="0" MaxCityStates="18" DefaultCityStates="9"
+             SortIndex="30"/>
+
+    <Replace Domain="StandardMapSizes" MapSizeType="MAPSIZE_STANDARD"
+             Name="LOC_MAPSIZE_STANDARD_NAME" Description="LOC_MAPSIZE_STANDARD_DESCRIPTION"
+             MinPlayers="2" MaxPlayers="14" DefaultPlayers="8"
+             MinCityStates="0" MaxCityStates="22" DefaultCityStates="12"
+             SortIndex="40"/>
+
+    <Replace Domain="StandardMapSizes" MapSizeType="MAPSIZE_LARGE"
+             Name="LOC_MAPSIZE_LARGE_NAME" Description="LOC_MAPSIZE_LARGE_DESCRIPTION"
+             MinPlayers="2" MaxPlayers="16" DefaultPlayers="10"
+             MinCityStates="0" MaxCityStates="26" DefaultCityStates="15"
+             SortIndex="50"/>
+
+    <Replace Domain="StandardMapSizes" MapSizeType="MAPSIZE_HUGE"
+             Name="LOC_MAPSIZE_HUGE_NAME" Description="LOC_MAPSIZE_HUGE_DESCRIPTION"
+             MinPlayers="2" MaxPlayers="20" DefaultPlayers="12"
+             MinCityStates="0" MaxCityStates="28" DefaultCityStates="18"
+             SortIndex="60"/>
+
+  </MapSizes>
+</GameInfo>
