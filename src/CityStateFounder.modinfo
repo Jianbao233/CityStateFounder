@@ -8,6 +8,28 @@
     <CompatibleVersions>1.2,2.0</CompatibleVersions>
   </Properties>
 
+  <!-- ⚠️⚠️ 必须有这个块！
+       Properties 里的 Name / Description / Teaser 引用的是 LOC 键，而
+       **游戏内「额外内容 / MOD 配置」面板读的是 modinfo 自带的 <LocalizedText>**
+       —— 它在【扫描 mod 时】就要能解析，比任何 FrontEndActions 都早。
+       缺了它，面板上会直接显示 LOC_CSF_MOD_NAME 这样的原始键。
+       （对照：ODA / JIANBAO / FlandreEmpire 的 modinfo 都有这个块；
+         CCB 系列的 <Name> 直接写明文，所以它们不需要。） -->
+  <LocalizedText>
+    <Text id="LOC_CSF_MOD_NAME">
+      <en_US>City-State Founder</en_US>
+      <zh_Hans_CN>城邦缔造者</zh_Hans_CN>
+    </Text>
+    <Text id="LOC_CSF_MOD_TEASER">
+      <en_US>Let the player place City-States on the map.</en_US>
+      <zh_Hans_CN>让玩家亲手把城邦放上地图。</zh_Hans_CN>
+    </Text>
+    <Text id="LOC_CSF_MOD_DESCRIPTION">
+      <en_US>Adds the City-State Envoy unit, which cannot found a normal city but instead founds a City-State. A panel lists the City-States available in this game (icon / name / suzerain bonus) for you to choose from.</en_US>
+      <zh_Hans_CN>新增「建邦使节」单位：它不能建立普通城市，而是建立一个城邦。配套面板会列出本局可用的城邦（图标 / 名称 / 宗主加成）供你选择。</zh_Hans_CN>
+    </Text>
+  </LocalizedText>
+
   <ActionCriteria>
     <Criteria id="CSF_XP2">
       <RuleSetInUse>RULESET_EXPANSION_2</RuleSetInUse>
