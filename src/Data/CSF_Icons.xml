@@ -48,10 +48,19 @@
          Atlas="ICON_ATLAS_UNIT_PORTRAITS" Index="0"/>
     <Row Name="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_MODERN"
          Atlas="ICON_ATLAS_UNIT_PORTRAITS_2" Index="37"/>
+    <!--  ⚠️⚠️ 这两行【必须】写成真实的 Atlas+Index，不能用 OtherName 别名！
+          实测（Database.log）：
+            [Database] ERROR: table IconDefinitions has no column named OtherName
+            [Database]: In Query - insert into IconDefinitions('Name', 'OtherName') values (?, ?);
+            [Database]: ...from file .../CityStateFounder/Data/CSF_Icons.xml.
+          → **IconDefinitions 表里根本没有 OtherName 这一列**。
+          （官方 Icons_UnitPortraits.xml:729 确实那样写，但它走的大概是另一条
+            加载路径；模组用 DB 加载器就会失败，那两行会被静默丢弃。）
+          正确做法：直接写出 Atlas + Index，指向与 MODERN 相同的那一格。 -->
     <Row Name="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_ATOMIC"
-         OtherName="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_MODERN"/>
+         Atlas="ICON_ATLAS_UNIT_PORTRAITS_2" Index="37"/>
     <Row Name="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_INFORMATION"
-         OtherName="ICON_UNIT_CSF_ENVOY_PORTRAIT_ERA_MODERN"/>
+         Atlas="ICON_ATLAS_UNIT_PORTRAITS_2" Index="37"/>
 
   </IconDefinitions>
 </GameInfo>
