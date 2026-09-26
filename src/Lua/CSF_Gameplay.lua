@@ -595,23 +595,39 @@ end
 -- ---------------------------------------------------------------------------
 -- 【地图上保留几座城邦】—— 决定世界看起来有多"正常"
 --   语义：开局时本局有 T 个城邦玩家（T 由【开局设置】决定）。
---         其中 **CSF_KEEP_ACTIVE_ON_MAP 个正常留在地图上、照常建城**；
---         其余的（T − 这个数）全部送下地图保持休眠，供玩家用建邦使节放置。
---
---   ⭐ 默认 6：保证地图上始终有城邦可以互动（能派使者、能争宗主），
---      同时留出一批给玩家自己放。
+--         其中若干座正常留在地图上、照常建城；其余的（T − 保留数）
+--         全部送下地图保持休眠，供玩家用建邦使节放置。
 --
 --   取值：
---     -1  = 全部留在地图上（= 纯原版行为，面板里没有可建的城邦）
---      0  = 全部藏起来（⚠️ 地图上一座城邦都没有 —— 世界会很空，不推荐）
---      N  = 留 N 座在地图上；其余（T − N）可建
+--     >= 0 = 【绝对值】留 N 座在地图上（其余 T − N 可建）
+--       -1 = 全部留在地图上（= 纯原版行为，面板里没有可建的城邦）
+--       -2 = 【按比例】（**默认**）—— 用下面的 CSF_KEEP_ACTIVE_PERCENT
 --
---   ⚠️⚠️ 本局城邦总数 T 的上限（官方 MapSizes.xml 的 MaxCityStates）：
---         Duel 6 / Tiny 10 / Small 14 / Standard 18 / Large 22 / Huge 24
---       所以"可建数量 = T − N"。**想同时要"地图上城邦多"和"可建数量多"，
---       唯一的办法是提高 T —— 也就是在开局设置里把城邦数量调高**
---       （见 Data/CSF_MapSizes.sql，那里记录了我们为什么不自动改 T）。
-local CSF_KEEP_ACTIVE_ON_MAP = 6;
+--   ⭐ 为什么默认用比例而不是固定值（T-146）：
+--      固定值在小地图上会让功能**静默失效**。例如固定 6：
+--        · 决斗图默认只有 3 个城邦 → 3 − 6 夹到 0 → **一个都建不了**
+--        · 决斗图拉满 6 个         → 6 − 6 = 0   → **一个都建不了**
+--      玩家造出建邦使节却发现"没东西可建"，且没有任何提示。
+--      比例制在任意地图尺寸下都保证"有得建"。
+--
+--   上限（官方 MapSizes.xml 的 MaxCityStates）：
+--     Duel 6 / Tiny 10 / Small 14 / Standard 18 / Large 22 / Huge 24
+--   官方默认值（DefaultCityStates）：
+--     Duel 3 / Tiny 6 / Small 9 / Standard 12 / Large 15 / Huge 18
+--
+--   ⭐ 想要"地图观感与原版一致 + 多出来的全部可建"：
+--     在开局【高级设置】里用官方【城邦选择器】勾一个大候选池、把城邦数量拉满，
+--     再把 CSF_KEEP_ACTIVE_ON_MAP 设成官方 DefaultCityStates 的数值。
+--     （详见 Data/CSF_MapSizes.sql 的说明）
+local CSF_KEEP_ACTIVE_ON_MAP = -2;
+
+-- 按比例保留时，留在地图上的百分比（1..100）
+--   50 = 一半留在地图上、一半可建（**默认**）
+--        标准图 12 个 → 6 留 + 6 可建（与旧的固定值 6 行为一致）
+--        决斗图  3 个 → 2 留 + 1 可建（旧固定值下这里是 0 可建）
+--   0  = 全部可建（地图上没有城邦，⚠️ 世界会很空）
+--   100= 全部留在地图上（= 纯原版，没有可建的）
+local CSF_KEEP_ACTIVE_PERCENT = 50;
 
 -- ---------------------------------------------------------------------------
 -- 【额外休眠城邦】—— 开局"凭空"多造几个城邦玩家，让玩家有更多可选（T-144）
@@ -877,22 +893,34 @@ local function CSF_CreateExtraDormantCityStates()
 end
 
 -- 开局/读档完成后执行预留
---   预留数 = 本局城邦总数 − CSF_KEEP_ACTIVE_ON_MAP
---     CSF_KEEP_ACTIVE_ON_MAP == -1 → 一个都不藏（纯原版）
---     CSF_KEEP_ACTIVE_ON_MAP ==  0 → 全部藏起来
+--   预留数 = 本局城邦总数 − 地图上保留数
+--     CSF_KEEP_ACTIVE_ON_MAP >= 0 → 保留数 = 该值（绝对值）
+--     CSF_KEEP_ACTIVE_ON_MAP == -1 → 全留（预留 0 个，纯原版）
+--     CSF_KEEP_ACTIVE_ON_MAP == -2 → 按 CSF_KEEP_ACTIVE_PERCENT 比例保留
 local function CSF_ReserveCityStates()
     local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
     local iTotal = #tIDs;
     local iDone = 0;
 
-    -- 要藏几个 = 总数 − 地图上保留数（保留数为 -1 时表示全留，即藏 0 个）
-    local iWantReserve;
-    if CSF_KEEP_ACTIVE_ON_MAP == nil or CSF_KEEP_ACTIVE_ON_MAP < 0 then
-        iWantReserve = 0;
+    -- 先算【地图上要保留几座】
+    local iKeep;
+    if CSF_KEEP_ACTIVE_ON_MAP == nil or CSF_KEEP_ACTIVE_ON_MAP == -1 then
+        iKeep = iTotal;                                  -- 全留 = 纯原版
+    elseif CSF_KEEP_ACTIVE_ON_MAP == -2 then
+        -- 按比例。用 floor 保证"至少藏 1 个"（否则小地图上功能会静默失效）
+        local iPct = CSF_KEEP_ACTIVE_PERCENT or 50;
+        if iPct < 0 then iPct = 0 elseif iPct > 100 then iPct = 100 end
+        iKeep = math.floor(iTotal * iPct / 100);
+        if iPct < 100 and iKeep >= iTotal and iTotal > 0 then
+            iKeep = iTotal - 1;                          -- 至少留 1 个可建
+        end
     else
-        iWantReserve = iTotal - CSF_KEEP_ACTIVE_ON_MAP;
-        if iWantReserve < 0 then iWantReserve = 0 end
+        iKeep = CSF_KEEP_ACTIVE_ON_MAP;                  -- 绝对值
     end
+    if iKeep < 0 then iKeep = 0 end
+    if iKeep > iTotal then iKeep = iTotal end
+
+    local iWantReserve = iTotal - iKeep;
 
     for _, iPlayer in ipairs(tIDs) do
         if iDone >= iWantReserve then break end
@@ -915,10 +943,7 @@ local function CSF_ReserveCityStates()
 
     print("[CSF] reserve done: " .. tostring(iDone) .. " / " .. tostring(iTotal) ..
           " city-state(s) hidden  —— 地图上保留 " .. tostring(iTotal - iDone) ..
-          " 座（目标 " ..
-          ((CSF_KEEP_ACTIVE_ON_MAP == nil or CSF_KEEP_ACTIVE_ON_MAP < 0)
-            and "ALL" or tostring(CSF_KEEP_ACTIVE_ON_MAP)) .. "），" ..
-          "可建 " .. tostring(iDone) .. " 座");
+          " 座（目标 " .. tostring(iKeep) .. "），可建 " .. tostring(iDone) .. " 座");
     return iDone;
 end
 
@@ -1120,6 +1145,76 @@ end
 -- 【动态创建（AddPlayer）】开关见文件顶部配置区（必须在所有使用点之前定义）。
 -- ⚠️ 注意：`CSF_ALLOW_OWN_TERRITORY` 必须在使用它的函数【之前】定义，
 --    否则 Lua 读到的是全局 nil（开关会失效）。定义见文件上方配置区。
+
+-- ---------------------------------------------------------------------------
+-- 【本局城邦统计】—— 给面板用，避免把"池子大小"当成"本局城邦数"（T-145）
+-- ---------------------------------------------------------------------------
+--   ⚠️ 曾经踩的坑：面板提示行里写的是"本局共 48 个城邦"，而 48 是
+--      `CityStates` 配置表的**池子大小**（Expansion2CityStates 域），
+--      **不是本局实际有几个城邦**。本局城邦数由开局设置决定（标准 12 / 巨大 18）。
+--      两者混淆会让玩家以为"本局有 48 个城邦"，进而困惑为什么只能建 7 个。
+--
+--   返回：{ total, dormant, active, pending, pool }
+--     total   = 本局城邦玩家总数
+--     dormant = 休眠中（0 城 + 地图上无单位）= **可建**
+--     active  = 已建城（在地图上正常运作）
+--     pending = 0 城但地图上已有单位（已派出移民、等它自己建城）
+--     ⚠️ 三类必须满足 total = dormant + active + pending，否则面板数字对不上。
+--        （`pending` 这一类是实测发现的：`LoadScreenClose` 刚跑完时，本局原生
+--          城邦都还是 0 城但已有单位，若不单列就会让 total 对不上。）
+local function CSF_GetGameCityStateStats()
+    local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    local iTotal, iDormant, iActive, iPending = 0, 0, 0, 0;
+
+    for _, iPlayer in ipairs(tIDs) do
+        local pPlayer = Players[iPlayer];
+        if pPlayer ~= nil then
+            iTotal = iTotal + 1;
+            local iCities = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
+            if iCities > 0 then
+                iActive = iActive + 1;
+            else
+                -- 0 城：再看地图上有没有单位（T-124 的判定口径）
+                local bOnMap = false;
+                CSF_Safe(function()
+                    for _, pUnit in pPlayer:GetUnits():Members() do
+                        local x = CSF_Safe(function() return pUnit:GetX() end);
+                        local y = CSF_Safe(function() return pUnit:GetY() end);
+                        if x ~= nil and y ~= nil and x >= 0 and y >= 0 then
+                            bOnMap = true;
+                            break
+                        end
+                    end
+                end);
+                if bOnMap then
+                    iPending = iPending + 1;      -- 已派出、待建城
+                else
+                    iDormant = iDormant + 1;      -- 真休眠 = 可建
+                end
+            end
+        end
+    end
+
+    -- 池子大小（供参考，不要当成"本局城邦数"）
+    local sRuleset = CSF_Safe(function() return GameConfiguration.GetValue("RULESET") end);
+    local sDomain = "Expansion2CityStates";
+    if sRuleset == "RULESET_EXPANSION_1" then
+        sDomain = "Expansion1CityStates";
+    elseif sRuleset ~= "RULESET_EXPANSION_2" then
+        sDomain = "StandardCityStates";
+    end
+    local tPool = CSF_Safe(function()
+        return DB.ConfigurationQuery("SELECT CivilizationType FROM CityStates WHERE Domain = ?", sDomain);
+    end) or {};
+
+    return {
+        total   = iTotal,
+        dormant = iDormant,
+        active  = iActive,
+        pending = iPending,
+        pool    = #tPool,
+    };
+end
 
 -- 【混合建邦】按文明建邦：
 --   返回 (ok, reason, iCityStatePlayerID, bFullMechanics)
@@ -1530,6 +1625,7 @@ ExposedMembers.CSF.CountEnvoys         = CSF_CountEnvoys;
 ExposedMembers.CSF.MaxEnvoysPerPlayer  = CSF_MAX_ENVOYS_PER_PLAYER;
 -- 【混合方案】
 ExposedMembers.CSF.GetFoundableCityStates = CSF_GetFoundableCityStates;
+ExposedMembers.CSF.GetGameCityStateStats = CSF_GetGameCityStateStats;
 ExposedMembers.CSF.FoundCityStateByCiv    = CSF_FoundCityStateByCiv;
 ExposedMembers.CSF.GetLeaderForCiv        = CSF_GetLeaderForCiv;
 -- 【延迟执行】UI 用这个下单

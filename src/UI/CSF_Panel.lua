@@ -199,15 +199,33 @@ function CSF_Refresh()
 
     -- 提示里带上"可用 / 本局总数"，让玩家知道还能不能更多
     --   ⭐ 面板【只列本局真实存在的城邦】——因为只有它们能被引擎正确创建。
-    --      本局城邦数量由【开局设置】决定（巨大图最多 24 个）。
+    --   ⚠️⚠️ 这里必须用【本局城邦数】，不能用【城邦池大小】（T-145 修正）：
+    --      池子固定 48 个（Expansion2CityStates 域），而本局只有开局设置的数量
+    --      （标准 12 / 巨大 18）。曾经误用池子大小 → 显示"本局共 48 个城邦"，
+    --      玩家会以为有 48 个可用，实际只能建 7 个，非常困惑。
+    local iGameTotal = #tAll;    -- 兜底：拿不到统计时退回旧行为
+    local fStats = (ExposedMembers ~= nil and ExposedMembers.CSF ~= nil)
+                   and ExposedMembers.CSF.GetGameCityStateStats or nil;
+    if fStats ~= nil then
+        local okS, kStats = pcall(fStats);
+        if okS and type(kStats) == "table" and kStats.total ~= nil then
+            iGameTotal = kStats.total;
+            print("[CSF] panel: 本局城邦统计 total=" .. tostring(kStats.total) ..
+                  " dormant=" .. tostring(kStats.dormant) ..
+                  " active=" .. tostring(kStats.active) ..
+                  " pending=" .. tostring(kStats.pending) ..
+                  " pool=" .. tostring(kStats.pool));
+        end
+    end
+
     Controls.CSFHint:SetText(
         CSF_Loc("LOC_CSF_PANEL_HINT") .. "[NEWLINE]" ..
         CSF_Loc("LOC_CSF_PANEL_COUNT_PRE") .. " " .. tostring(#tList) .. " " ..
-        CSF_Loc("LOC_CSF_PANEL_COUNT_MID") .. " " .. tostring(#tAll) .. " " ..
+        CSF_Loc("LOC_CSF_PANEL_COUNT_MID") .. " " .. tostring(iGameTotal) .. " " ..
         CSF_Loc("LOC_CSF_PANEL_COUNT_SUF") ..
         (sSpotMsg ~= "" and ("[NEWLINE]" .. sSpotMsg) or ""));
     print("[CSF] panel: 本局可用城邦 " .. tostring(#tList) ..
-          " 个（池内共 " .. tostring(#tAll) .. " 个）");
+          " 个（本局城邦共 " .. tostring(iGameTotal) .. " 个）");
 
     local iReusable = 0;
     for _, kEntry in ipairs(tList) do

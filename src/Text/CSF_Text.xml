@@ -68,10 +68,10 @@
       <Text>of</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_SUF" Language="zh_Hans_CN">
-      <Text>个城邦（由开局设置决定；想更多请在开局设置里提高城邦数量）</Text>
+      <Text>个城邦（本局数量由开局设置决定。想要更多可选：在【高级设置 → 城邦选择器】里勾选更大的候选池，再把城邦数量调高）</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_SUF" Language="en_US">
-      <Text>City-States in this game (raise the count in game setup for more)</Text>
+      <Text>City-States in this game (set in game setup. For more choice, open Advanced Setup, use the City-State Picker to select a larger pool, then raise the City-State count)</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_CONFIRM" Language="zh_Hans_CN">
       <Text>建立</Text>
