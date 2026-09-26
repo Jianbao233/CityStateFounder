@@ -6,22 +6,40 @@
 -- ⚠️ 当前状态：【不修改】。下面的 UPDATE 全部注释掉了。
 --
 -- ---------------------------------------------------------------------------
--- 这个文件为什么重要（它决定"可建数量"的上限）
+-- ⭐⭐ 先搞清楚：原版本来就有【城邦选择器】（2026-09-26 考证）
 -- ---------------------------------------------------------------------------
--- 本模组的机制是：把本局【已有的】城邦玩家送下地图保持休眠，玩家再用建邦
--- 使节把它们放上地图。所以：
+-- 文件：`Base/Assets/UI/FrontEnd/CityStatePicker.lua`（370 行）+ `CityStatePicker.xml`
+-- 入口：**高级设置（AdvancedSetup）里的一个按钮**（`CreateCityStatePickerDriver`）
 --
+-- 语义（实读源码）：
+--   · 列出【全部 48 个】城邦，逐个勾选，作为本局的【候选池】
+--   · 同一界面里还能调【城邦数量】滑条（`InitCityStateCountSlider`）
+--   · 约束来自 `LOC_CITY_STATE_PICKER_COUNT_WARNING`：
+--       "A **minimum** of {1_Min} City-States must be selected to continue."
+--     → **只要求下限，允许勾选【超过】城邦数量的条目**
+--       （`RefreshCountWarning` 里是 `numSelected < Count` 才禁用确认按钮）
+--   · 游戏从候选池里抽 `CityStateCount` 个真正上场
+--
+--   → **"想要更多城邦可选"这件事，原版已经支持**：高级设置里勾一个大候选池
+--     + 把城邦数量滑条拉到上限即可。
+--
+-- ---------------------------------------------------------------------------
+-- 本模组与它的配合（推荐配置）
+-- ---------------------------------------------------------------------------
 --     可建数量 = 本局城邦总数 T − 地图上保留数 N
---                （T 由 MapSizes 决定，N 由 CSF_KEEP_ACTIVE_ON_MAP 决定）
+--                （T 由这里 / 开局滑条决定，N 由 CSF_KEEP_ACTIVE_ON_MAP 决定）
 --
--- 官方 MapSizes.xml 的 MaxCityStates（= 开局设置里能拉到的上限）：
---     Duel 6 / Tiny 10 / Small 14 / Standard 18 / Large 22 / Huge 24
---   官方 DefaultCityStates（= 默认值）：
---     Duel 3 / Tiny 6 / Small 9 / Standard 12 / Large 15 / Huge 18
+--   ⭐ 想要"地图观感与原版一致 + 还有一批可以自己建"：
+--        ① 高级设置 → 城邦选择器：勾一个【较大的候选池】
+--        ② 城邦数量：拉到 MaxCityStates（Duel 6 / Tiny 10 / Small 14 /
+--           Standard 18 / Large 22 / Huge 24）
+--        ③ 本模组 CSF_KEEP_ACTIVE_ON_MAP 设为【官方默认值】
+--           （Duel 3 / Tiny 6 / Small 9 / Standard 12 / Large 15 / Huge 18）
+--        结果 = 地图上按官方默认数量正常生成，多出来的全部可建
 --
--- 也就是说：**想在"地图上城邦数量正常"的同时还想有很多可建的，唯一的办法
--- 就是把本局城邦总数 T 拉高** —— 要么玩家在开局设置里手动拉满（拉到
--- MaxCityStates），要么在这里改。
+--   ⚠️ ② 能拉多高取决于地图容量。超过容量时地图脚本会放不下 ——
+--      **官方脚本**会优雅跳过（打印 `-- START FAILED MINOR --`），
+--      **CCB Maps 的脚本会崩**（见下）。
 --
 -- ---------------------------------------------------------------------------
 -- 为什么默认不改（T-22 已知雷区）
@@ -32,20 +50,32 @@
 --     BBM_AssignStartingPlots.lua:353: attempt to index a nil value
 --     in 'BBS_Assign' / 'GenerateMap'
 --
--- 原因是城邦出生点分配时 validspawnsleft 为空 —— 地图脚本找不到足够的合法
--- 出生点。城邦数量越多，越容易触发。
+-- **根因（2026-09-26 读 CCB Maps 源码确认）**：它的分配循环没有保护 ——
+--
+--     for i, cs in pairs(BBS_Citystates) do
+--         local validspawnsleft = BBM_HexMap:GetAnyMinorSpawnablesTiles()
+--         while foundSpawn == false do                        -- ⚠️ 没有退出条件
+--             local rng = TerrainBuilder.GetRandomNumber(#validspawnsleft - 1, ...);
+--             local testedHex = validspawnsleft[rng+1]        -- ← 出生点用完 = nil
+--             if testedHex.IsCivStartingPlot == false then    -- ← 索引 nil → 崩
+--
+-- 出生点用完（`#validspawnsleft == 0`）时 `validspawnsleft[rng+1]` 是 nil →
+-- `attempt to index a nil value`。**而且那个 `while` 没有退出条件，即使不崩也会死循环。**
+-- 官方 `AssignStartingPlots.lua:216` 是
+--     `while i <= iMinorCivStartLocs - 1 and valid < self.iNumMinorCivs`
+-- —— **有上限、位置不够就打印 `-- START FAILED MINOR --` 优雅退出**。
+--
+-- → **结论：只要城邦数量不超过地图容量，CCB Maps 就不会走到那一步。**
+--   小幅提高（例如 Standard 18 → 22）值得实测；一次性 +12 会崩。
 --
 -- ---------------------------------------------------------------------------
 -- 如果要放开（务必先实测）
 -- ---------------------------------------------------------------------------
 -- ① 先确认没有启用任何改 MapSizes 或地图脚本的 mod（尤其是 CCB Maps）。
 -- ② 放开下面这组，然后**开一局新游戏实测地图能否正常生成**：
---        UPDATE MapSizes SET MaxCityStates = MaxCityStates + 12;
---    然后把 CSF_KEEP_ACTIVE_ON_MAP 设成官方 DefaultCityStates
---    （Duel 3 / Tiny 6 / Small 9 / Standard 12 / Large 15 / Huge 18）。
---    效果 = 地图上按官方默认数量正常生成，多出来的全部可建。
--- ③ 注意：+12 只是示例。Huge 已经是 24，再加可能超出地图容量 ——
---    宁可少加，也不要一上来就拉满。
+--        UPDATE MapSizes SET MaxCityStates = MaxCityStates + 4;
+--    然后把 CSF_KEEP_ACTIVE_ON_MAP 设成官方 DefaultCityStates。
+-- ③ 宁可少加，也不要一上来就拉满 —— 出生点不够时 CCB Maps 会崩。
 -- ===========================================================================
 
 -- UPDATE MapSizes SET DefaultCityStates = DefaultCityStates + 12;
