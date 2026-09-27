@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ===========================================================================
+     CityStateFounder / 城邦缔造者 —— 滑条上限压回官方值
+     ===========================================================================
+
+     目的：让开局设置里的「城邦数量」滑条【只显示到官方上限 X】，
+           而引擎实际能激活的上限是 X + X/2（由 Data/CSF_MapSizes.xml 抬高）。
+
+     原理：
+       滑条的上限来自配置库 Queries 表里的这一行
+       （官方定义在 Base/Assets/Configuration/Data/SetupParameters.xml:245）：
+
+         <Row QueryId="CityStateCountRange"
+              SQL="SELECT 'CityStateCountRange' AS Domain,
+                          ?1 AS MinimumValue, ?2 AS MaximumValue LIMIT 1"/>
+
+       其中 ?1 / ?2 来自 MapSpecificQueries 的
+         Index=1 → MAP_MIN_MINOR_PLAYERS
+         Index=2 → MAP_MAX_MINOR_PLAYERS
+
+       我们用 CSF_MapSizes.xml 把上限抬到了 X + X/2，
+       于是 ?2 会拿到抬高后的值 —— 滑条就跟着变高。
+
+       ★ 这里用 CASE 把抬高后的值【映射回官方值】，只影响这条查询的结果，
+         也就是只影响 UI；引擎的 MAP_MAX_MINOR_PLAYERS 不受影响。
+
+       映射表（官方 X → 抬高后 X + X/2）：
+         决斗   6 → 9      极小 10 → 15     小   14 → 21
+         标准  18 → 27     大   22 → 33     巨大 24 → 36
+
+     ⚠️ Replace 是整行替换，但这张表只有两列（QueryId / SQL），都给全了。
+     ⚠️ 若以后改了 CSF_MapSizes.xml 里的上限，这张映射表也要同步改。
+     =========================================================================== -->
+<GameInfo>
+  <Queries>
+    <Replace QueryId="CityStateCountRange"
+             SQL="SELECT 'CityStateCountRange' AS Domain, ?1 AS MinimumValue, CASE ?2 WHEN 9 THEN 6 WHEN 15 THEN 10 WHEN 21 THEN 14 WHEN 27 THEN 18 WHEN 33 THEN 22 WHEN 36 THEN 24 ELSE ?2 END AS MaximumValue LIMIT 1"/>
+  </Queries>
+</GameInfo>
