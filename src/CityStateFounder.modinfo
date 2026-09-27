@@ -59,7 +59,7 @@
       <Properties>
         <LoadOrder>999999</LoadOrder>
       </Properties>
-      <File>Data/CSF_MapSizes.sql</File>
+      <File>Data/CSF_MapSizes.xml</File>
     </UpdateDatabase>
     <!-- ⭐ 单位图标（复用开拓者的图）—— 照官方 Australia.modinfo:36 的写法 -->
     <UpdateIcons id="CSF_Icons_FE">
@@ -120,6 +120,22 @@
         <LuaReplace>UI/CSF_UnitPanel.lua</LuaReplace>
       </Properties>
     </ReplaceUIScript>
+      <!-- ⭐⭐ CCB Maps 崩溃修复补丁（T-155）
+         覆盖 CCB Maps 的 Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua。
+         该文件【只有 CCB Maps / BBM 提供】，其他任何地图 mod 都不碰它，
+         所以覆盖它不会与别的地图 mod 冲突。
+         改动只有一处：给城邦出生点分配循环补上边界检查（原版没检查，
+         出生点用完时会索引 nil 直接崩掉地图生成）。
+         正常情况（数量在地图容量内）行为与原版完全一致。
+         注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。 -->
+    <ImportFiles id="CSF_CCB_SPAWN_FIX">
+      <Properties>
+        <LoadOrder>3000000</LoadOrder>
+      </Properties>
+      <Items>
+        <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
+      </Items>
+    </ImportFiles>
   </InGameActions>
 
   <Files>
@@ -132,9 +148,9 @@
          属于改变玩家可选范围的改动，应由玩家自己决定；
          而且和 CCB Maps 同用时需要先实测地图容量（详见该文件内的说明）。 -->
     <File>Data/CSF_MapSizes.xml</File>
-    <!-- ⚠️ 地图钩子文件【必须】同时列在这里！
-         实测：只在 InGameActions 的 ImportFiles 里列出、却漏了 <Files> 时，
-         文件根本不会进 VFS —— 钩子静默失效（Lua.log 里零日志）。 -->
+    <!-- ⚠️ 被 ImportFiles 覆盖的文件【必须】同时列在这里，否则不进 VFS。
+         实测踩到过：只在 ImportFiles 里列、漏了 <Files> 时钩子静默失效。 -->
+    <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
