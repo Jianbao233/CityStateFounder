@@ -1243,3 +1243,30 @@ function CivilizationAssignSpawn:FindTotalNumberOfValidTiles(BBM_HexMap)
 end
 
 
+-- ===========================================================================
+-- ===== CityStateFounder 补丁 ②（放在文件末尾，确保原函数已定义）=====
+-- ===========================================================================
+-- GetBiasFactorV2 只在 bias.Tier 落在 1~5 时才返回数值，
+-- 其它情况（例如城邦数量拉得很高、bias 数据里出现 Tier 为 nil 或 0 的行）
+-- 会走完所有分支【返回 nil】。
+--
+-- 而本文件有 7 处调用点都写成  X * GetBiasFactorV2(bias) ，
+-- 一旦返回 nil 就变成  number * nil  →
+--   "operator * is not supported for number * nil"
+--   → "Call to GenerateMap() had errors" → 地图生成失败、进不了游戏。
+-- （实测：滑条选 18、实际创建 27 时必崩。）
+--
+-- 补丁：包一层，保证它【永不返回 nil】。算不出因子就当 0（不参与偏好打分），
+--       语义等同"该偏好的这一档无效"。一处改动覆盖全部 7 个调用点。
+local CSF_OrigGetBiasFactorV2 = GetBiasFactorV2;
+
+function GetBiasFactorV2(bias)
+	local iFactor = CSF_OrigGetBiasFactorV2(bias);
+	if iFactor == nil then
+		return 0;
+	end
+	return iFactor;
+end
+-- ===== 补丁结束 =====
+
+
