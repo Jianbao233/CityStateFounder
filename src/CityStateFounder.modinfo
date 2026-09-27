@@ -68,19 +68,20 @@
   </FrontEndActions>
 
   <InGameActions>
-    <!-- ⭐ 前端城邦选择器：滑条显示 N，实际写入 N + floor(N/2)。
-         ⚠️⚠️ 实测结论（2026-09-27）：这条 ImportFiles 放在 FrontEndActions 里
-            【不会被应用】—— Modding.log 里连动作名都不出现（同文件里其它
-            FrontEndActions 的 UpdateDatabase 都正常）。移到 InGameActions 后
-            才能进 VFS（VFS 是全局的，前端 UI 照样能读到覆盖后的文件）。
-         ⚠️ 也试过 ReplaceUIScript + LuaContext=CityStatePicker，同样不生效。
-         文件必须叫 CityStatePicker.lua（ImportFiles 按文件名解析）。 -->
-    <ImportFiles id="CSF_CITYSTATEPICKER_IMPORT">
+    <!-- ⭐ 城邦数量：滑条选 N，实际写 N + floor(N/2)（多出的由本模组收走供建立）
+         ⚠️ 覆盖 GameSetupLogic.lua，挂在 Parameters_Config_EndWrite 上 ——
+            那是【把配置交给引擎之前】的最后一个钩子，参数里已是玩家选好的值。
+         ⚠️ 试过但无效的两条路（都记下来免得再走）：
+            · CityStatePicker.lua —— 只在点开选择器时才加载，玩家在高级设置
+              界面设数量时它根本没跑
+            · 把 ImportFiles 放 FrontEndActions —— 该动作类型在那里不会被应用
+              （Modding.log 里连动作名都不出现） -->
+    <ImportFiles id="CSF_SETUPLOGIC_IMPORT">
       <Properties>
         <LoadOrder>2000000</LoadOrder>
       </Properties>
       <Items>
-        <File>UI/CityStatePicker.lua</File>
+        <File>UI/GameSetupLogic.lua</File>
       </Items>
     </ImportFiles>
     <UpdateDatabase id="CSF_Units" criteria="CSF_XP2">
@@ -107,6 +108,7 @@
       </Properties>
       <Items>
         <File>UI/CSF_Panel.xml</File>
+    <File>UI/GameSetupLogic.lua</File>
         <File>UI/CSF_Panel.lua</File>
       </Items>
     </ImportFiles>
@@ -117,6 +119,7 @@
       </Properties>
       <Items>
         <File>UI/CSF_Panel.xml</File>
+    <File>UI/GameSetupLogic.lua</File>
       </Items>
     </AddUserInterfaces>
 
@@ -172,7 +175,6 @@
          而且和 CCB Maps 同用时需要先实测地图容量（详见该文件内的说明）。 -->
     <File>Data/CSF_MapSizes.xml</File>
     <File>Data/CSF_CityStateCountRange.xml</File>
-    <File>UI/CityStatePicker.lua</File>
     <!-- ⚠️ 被 ImportFiles 覆盖的文件【必须】同时列在这里，否则不进 VFS。
          实测踩到过：只在 ImportFiles 里列、漏了 <Files> 时钩子静默失效。 -->
     <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
@@ -180,6 +182,7 @@
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
+    <File>UI/GameSetupLogic.lua</File>
     <File>UI/CSF_Panel.lua</File>
     <File>UI/CSF_UnitPanel.lua</File>
     <File>Text/CSF_Text.xml</File>
