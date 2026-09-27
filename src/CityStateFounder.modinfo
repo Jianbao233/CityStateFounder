@@ -108,7 +108,6 @@
       </Properties>
       <Items>
         <File>UI/CSF_Panel.xml</File>
-    <File>UI/FrontEnd/GameSetupLogic.lua</File>
         <File>UI/CSF_Panel.lua</File>
       </Items>
     </ImportFiles>
@@ -119,7 +118,6 @@
       </Properties>
       <Items>
         <File>UI/CSF_Panel.xml</File>
-    <File>UI/FrontEnd/GameSetupLogic.lua</File>
       </Items>
     </AddUserInterfaces>
 
