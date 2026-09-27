@@ -956,6 +956,18 @@ local function CSF_ReserveCityStates()
     for _, iPlayer in ipairs(tOrdered) do
         if iDone >= iWantReserve then break end
 
+        -- ⛔ 硬保险：本模组额外造的城邦【永不】被藏起来。
+        --    实测：对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION
+        --    读 0x798），因为它们不是引擎自己初始化的玩家。
+        --    把它们放在顺序最后还不够 —— 比例调低时（比如 0%）仍会轮到它们，
+        --    所以这里直接跳过，彻底杜绝。
+        local bIsExtra = CSF_Safe(function()
+            return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
+        end);
+        if bIsExtra ~= nil and bIsExtra ~= 0 then
+            goto continue_reserve;
+        end
+
         -- 已经是预留的就跳过
         if not CSF_IsReserved(iPlayer) then
             local iCities = CSF_Safe(function()
@@ -970,6 +982,8 @@ local function CSF_ReserveCityStates()
                 end
             end
         end
+
+        ::continue_reserve::
     end
 
     print("[CSF] reserve done: " .. tostring(iDone) .. " / " .. tostring(iTotal) ..
