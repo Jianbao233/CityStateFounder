@@ -132,6 +132,9 @@
          属于改变玩家可选范围的改动，应由玩家自己决定；
          而且和 CCB Maps 同用时需要先实测地图容量（详见该文件内的说明）。 -->
     <File>Data/CSF_MapSizes.xml</File>
+    <!-- ⚠️ 地图钩子文件【必须】同时列在这里！
+         实测：只在 InGameActions 的 ImportFiles 里列出、却漏了 <Files> 时，
+         文件根本不会进 VFS —— 钩子静默失效（Lua.log 里零日志）。 -->
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
