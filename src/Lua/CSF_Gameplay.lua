@@ -922,10 +922,18 @@ local function CSF_ReserveCityStates()
 
     local iWantReserve = iTotal - iKeep;
 
-    -- ⭐ 排序：优先收走【地图补丁额外造的】城邦（带 CSF_EXTRA_DORMANT 标记）。
-    --    为什么：那些城邦的出生点是兜底给的（可能挤在地图角落、甚至被地形困住），
-    --    留在地图上会很难看、也建不出像样的城。收走它们既解决观感，
-    --    又正好把它们变成"可建"的。
+    -- ⭐ 排序：本模组额外造的城邦【放到最后】。
+    --
+    -- ⚠️ 实测教训（2026-09-27）：一开始是"优先收走它们"，结果游戏原生崩溃
+    --    （EXCEPTION_ACCESS_VIOLATION，Error reading address 0x798）。
+    --    原因：那些城邦是用 WorldBuilder.PlayerManager():AddPlayer() 在
+    --    【地图生成阶段】新建的玩家，引擎可能没给它们建好完整状态 ——
+    --    我们一杀它们的单位（CSF_SendPlayerOffMap），引擎就访问了非法内存。
+    --    对照：引擎自己激活的城邦被同样处理完全没问题。
+    --
+    --    现在改成：它们【最后才考虑】，并且在数量足够时根本不动它们 ——
+    --    让它们留在地图上当正常城邦（出生点已改成地图中部的陆地，
+    --    观感与原版一致）。多出来的数量由基础城邦的休眠来提供。
     local tOrdered = {};
     local tExtra, tNormal = {}, {};
     for _, iPlayer in ipairs(tIDs) do
@@ -938,11 +946,11 @@ local function CSF_ReserveCityStates()
             tNormal[#tNormal + 1] = iPlayer;
         end
     end
-    for _, v in ipairs(tExtra) do tOrdered[#tOrdered + 1] = v end
     for _, v in ipairs(tNormal) do tOrdered[#tOrdered + 1] = v end
+    for _, v in ipairs(tExtra) do tOrdered[#tOrdered + 1] = v end
     if #tExtra > 0 then
         print("[CSF] reserve: 其中 " .. tostring(#tExtra) ..
-              " 个是本模组额外造的（优先收走）");
+              " 个是本模组额外造的（放到最后、尽量不动它们）");
     end
 
     for _, iPlayer in ipairs(tOrdered) do

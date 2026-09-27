@@ -692,6 +692,20 @@ function BBM_AssignStartingPlots.Create(args)
                                                         if iLand >= 4 then
                                                             fallbackPlot = p
                                                             h.IsCivStartingPlot = true
+                                                            -- ★ 分散：把周围 5 圈也标记为已占用，
+                                                            --    否则所有额外城邦会挤在同一小块
+                                                            --    （实测过：6 个全在 41-42, 26-28）。
+                                                            for ddx = -5, 5 do
+                                                                for ddy = -5, 5 do
+                                                                    local nx, ny = x + ddx, y + ddy
+                                                                    if nx >= 0 and nx < iW and ny >= 0 and ny < iH then
+                                                                        local nh = BBM_HexMap:GetHexInMap(nx, ny)
+                                                                        if nh ~= nil then
+                                                                            nh.IsCivStartingPlot = true
+                                                                        end
+                                                                    end
+                                                                end
+                                                            end
                                                             bFound = true
                                                             break
                                                         end
