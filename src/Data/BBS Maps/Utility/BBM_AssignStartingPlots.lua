@@ -450,8 +450,18 @@ function BBM_AssignStartingPlots.Create(args)
         --   让 CSF_Gameplay.lua 的休眠逻辑【优先】收走这些城邦 ——
         --   它们的出生点是兜底的（可能在南极角落），留在地图上会很难看。
         do
+            -- ⭐⭐ 额外城邦数量开关（隔离实验用）
+            --   0     = 【完全关闭】额外创建 —— 用于确认"崩溃是不是额外城邦引起的"
+            --   0.5   = 创建 floor(N × 0.5) 个（用户要的比例）
+            --   其他  = 同比例
+            -- ⚠️ 2026-09-27 实测：开启时功能完全正常（24 个城邦、12 个可建、
+            --    额外城邦被优先藏起来），但游戏在【加载完成后约 30 秒】静默退出，
+            --    没有崩溃转储、没有 Windows 事件、没有 Lua 报错。
+            --    为定位原因，暂时设 0 做隔离实验。
+            local CSF_EXTRA_RATIO = 0;
+
             local iBase = #BBS_Citystates
-            if iBase > 0 then
+            if iBase > 0 and CSF_EXTRA_RATIO ~= nil and CSF_EXTRA_RATIO > 0 then
                 -- ① 收集本局【已用】的城邦文明
                 local tUsed = {}
                 for _, cs in pairs(BBS_Citystates) do
@@ -479,7 +489,7 @@ function BBM_AssignStartingPlots.Create(args)
 --    62=自由城市、63=蛮族）。所以额外城邦最多 8 个 —— 下面的循环遇到
 --    AddPlayer 返回负数会自动停。要突破这个上限，需要去"激活"槽位 15-53 里
 --    那些 status=5 的预分配城邦（引擎开局就把 48 个城邦预注册在那里）。
-                local iWant = math.floor(iBase / 2)
+                local iWant = math.floor(iBase * CSF_EXTRA_RATIO)
                 if iWant > #tCand then iWant = #tCand end
                 print("BBM: [CSF extra] base CS = "..tostring(iBase)..
                       ", pool candidates = "..tostring(#tCand)..
