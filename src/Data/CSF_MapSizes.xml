@@ -1,84 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- ===========================================================================
-     CityStateFounder / 城邦缔造者 —— 提高城邦数量上限（已实机验证）
+     CityStateFounder / 城邦缔造者 —— 提高城邦数量上限
      ===========================================================================
 
-     ✅ 2026-09-27 实机验证通过：加载后活库里的 StandardMapSizes 确实变成
-        决斗 10 / 极小 14 / 小 18 / 标准 22 / 大 26 / 巨大 28（官方是 6/10/14/18/22/24），
-        而 DefaultCityStates 保持官方原值（3/6/9/12/15/18）不变。
+     ⛔⛔⛔ 【本文件当前【未注册】—— 因为实测会崩，见下面的实测记录】⛔⛔⛔
+
+     modinfo 里现在指向的是 Data/CSF_MapSizes.sql（不修改任何值）。
+     要启用本文件，需要把那条改成指向 Data/CSF_MapSizes.xml。
 
      ===========================================================================
-     ⭐⭐ 三个必须同时满足的条件（少一个就不生效）—— 都是实测踩出来的
+     ⛔ 实测记录（2026-09-27）：为什么默认不启用
      ===========================================================================
-     ① 必须用 XML 的 Replace，不能用 SQL 的 UPDATE
-        实测：`UPDATE MapSizes SET MaxCityStates = ...` 完全不生效。
-        证据：Modding.log 显示文件确实被加载
-        （ModdingUpdateConfigurationDatabase Loading Data/CSF_MapSizes.sql），
-        但活库毫无变化，连【去掉 WHERE、改所有行】都没用；
-        放 FrontEndActions 或 InGameActions、有无 LoadOrder、有无结尾 SELECT，
-        全都不影响结果。
+     用户在小图上把城邦数量拉到本文件抬高的上限（18），进入游戏时报错：
 
-     ② 必须给一个【很高的 LoadOrder】
-        实测：BBM（Better Balanced Maps，工坊 3179425402）的 Configuration/Config.xml
-        里也有 StandardMapSizes 的 Replace（用的是官方原值）。
-        默认顺序下它在【我们之后】加载（序列 135/196 vs 我们 107/196），
-        于是把我们的改动覆盖回原值。
-        加上 LoadOrder 999999 后我们排到最后（196/196），改动才保住。
-        ⚠️ 若你还装了别的改 MapSizes 的 mod，可能需要比 999999 更高。
+       Runtime Error: .../3556318517/Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua:353:
+                      attempt to index a nil value
+       Runtime Error: Call to GenerateMap() had errors
 
-     ③ Replace 是【整行替换】，11 列必须给全，漏掉的列会变成 NULL
-        列清单（见 Base/Assets/Configuration/Data/Schema/AdditionalTables.sql:144）：
-        Domain / MapSizeType / Name / Description / MinPlayers / MaxPlayers /
-        DefaultPlayers / MinCityStates / MaxCityStates / DefaultCityStates / SortIndex
-        主键是 (Domain, MapSizeType)。
-        （官方 MapSizes.xml 的 Row 不写 Domain，因为该列默认就是 StandardMapSizes。）
+     日志显示 CCB Maps 成功放置了 CS 1 到 CS 17，到【第 18 个】时出生点用完：
 
-     ===========================================================================
-     本文件改了什么
-     ===========================================================================
-     只提高 MaxCityStates（开局设置里城邦数量滑条的【上限】），
-     MinCityStates 与 DefaultCityStates 都保持官方原值，于是：
+       Map Script: CS 16 - CIVILIZATION_RAPA_NUI   spawn = (7, 6)
+       Map Script: CS 17 - CIVILIZATION_CAGUANA    spawn = (64, 7)
+       Runtime Error: ...BBM_AssignStartingPlots.lua:353: attempt to index a nil value
 
-       · 开局设置界面的布局与默认值完全不变
-       · 只是滑条能拉到更高（可选项变多）
-       · 想多要休眠城邦的玩家自己往上拉；不拉就还是原版体验
+     根因：CCB Maps 的分配循环没有边界检查，出生点用完时 validspawnsleft
+     为空数组，取下标得到 nil，紧接着索引 nil 就崩（位置见
+     BBM_AssignStartingPlots.lua 第 349 到 353 行）。
+     官方 AssignStartingPlots.lua 第 216 行则是有上限的循环，位置不够时
+     打印 START FAILED MINOR 优雅跳过，不会崩。
 
-     地图       官方 Max   本文件 Max   官方 Default（不动）
-     决斗            6          10            3
-     极小           10          14            6
-     小             14          18            9
-     标准           18          22           12
-     大             22          26           15
-     巨大           24          28           18
+     为什么 CCB Maps 能容纳的数量远少于官方：它自己有一条最小间距规则，
+     日志里是 BBM_ACTUALMINDIST = 11（城邦之间至少隔 11 格）。
+     本次地图至少 78 x 47（接近 Small），只能放下 17 个城邦。
+
+     → 结论：城邦数量上限【由地图与地图脚本的容量决定】，不是一个可以
+        随便抬高的数字。抬高滑条上限只会让玩家有机会把自己搞崩。
 
      ===========================================================================
-     ⚠️ 与 CCB Maps 同用时的注意事项
+     ✅ 仍然成立的技术结论（三个必须同时满足的条件，都实测过）
      ===========================================================================
-     城邦数量不能超过地图能提供的出生点。超过时：
-       · 官方地图脚本会优雅跳过（打印 START FAILED MINOR 警告），不会崩
-       · CCB Maps 的脚本会崩：它的分配循环没有退出条件，出生点用完时
-         validspawnsleft 为空数组，取下标得到 nil，紧接着索引 nil 就崩。
-         位置见 BBM_AssignStartingPlots.lua 第 349 到 353 行。
-         官方 AssignStartingPlots.lua 第 216 行则是有上限的循环，并打印警告。
-
-     ⚠️ 实测状态：本文件加载后【地图生成正常、CCB Maps 正常】
-        （BBS_AssignTries = 5，BBS_Success = true）。
-        但 headless 测试局固定只用 9 个城邦，所以【滑条拉到上限后的容量问题
-        尚未验证】—— 建议先小幅提高（例如标准图先只 +2）再逐步加大。
+     ① 必须用 XML 的 Replace，SQL 的 UPDATE 对配置库【完全无效】
+     ② 必须给【很高的 LoadOrder】—— 否则会被别的 mod 覆盖回原值。
+        实测 BBM（3179425402）的 Configuration/Config.xml 里也有
+        StandardMapSizes 的 Replace（官方原值），默认顺序下它在
+        我们之后加载（序列 135/196 vs 我们 107/196），会把改动抹掉。
+        加上 999999 后我们排到最后（196/196），改动才保住。
+     ③ Replace 是【整行替换】，11 列必须给全，漏列会变 NULL。
+     验证结果（读活库）：上限确实变成了 10/14/18/22/26/28，
+     而 DefaultCityStates 保持官方原值不变。
 
      ===========================================================================
-     和本模组开关的配合
+     如果你仍想尝试（务必从小幅开始）
      ===========================================================================
-         可建数量 = 本局城邦总数 T 减去 地图上保留数 N
-         T 由开局设置滑条决定（本文件抬高它的上限）
-         N 由 CSF_KEEP_ACTIVE_ON_MAP 决定（默认 -2，即按 CSF_KEEP_ACTIVE_PERCENT 50%）
-
-     想要"地图观感与原版一致 + 多出来的全部可建"：
-       1. 开局【高级设置 到 城邦选择器】：勾一个较大的候选池
-          （官方支持选超过数量的条目，只要求下限）
-       2. 城邦数量滑条：拉到本文件抬高后的上限
-       3. CSF_KEEP_ACTIVE_ON_MAP 设成官方 DefaultCityStates 的数值
-          （决斗 3 / 极小 6 / 小 9 / 标准 12 / 大 15 / 巨大 18）
+     1. 只在你确认过容量的地图上启用，且先小幅提高（例如小图 14 到 15）
+     2. 每次改完开新局实测，看 Lua.log 里有没有
+        BBM_AssignStartingPlots.lua:353 的报错
+     3. 一旦报错，说明超容量了，把数量调低重开
+     4. 若用官方地图脚本（非 CCB Maps），超容量只会优雅跳过、不会崩，
+        但城邦会少放几个
      =========================================================================== -->
 <GameInfo>
   <MapSizes>
