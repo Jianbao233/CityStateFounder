@@ -511,18 +511,33 @@ function BBM_AssignStartingPlots.Create(args)
                     print("BBM: [CSF extra] 空闲槽用尽；活着的城邦槽位状态 = "..
                           tostring(iAliveStatus))
 
-                    local tReusable = {}   -- 可复用的预分配槽（status 非空、非活、有城邦文明）
+                    local tReusable = {}   -- 可复用的预分配槽
                     if iAliveStatus ~= nil then
                         pcall(function()
-                            local tAliveSet = {}
-                            for _, pid in ipairs(PlayerManager.GetAliveMinorIDs()) do
-                                tAliveSet[pid] = true
-                            end
                             for slot = 0, 63 do
+                                -- ⚠️⚠️ 必须【三重】筛选，缺一不可。
+                                -- 实测踩到：只排除"存活的城邦"时，主文明（槽 0 拜占庭，
+                                -- 状态 3 ≠ 活城邦的 1）也被选进来了，
+                                -- SetSlotStatus 对主文明直接失败 → 整个额外创建中止。
+                                --
+                                -- ① 槽里必须有文明
                                 local sCiv = PlayerConfigurations[slot]:GetCivilizationTypeName()
-                                if sCiv ~= nil and sCiv ~= "" and not tAliveSet[slot] then
-                                    local iSt = PlayerConfigurations[slot]:GetSlotStatus()
-                                    if iSt ~= iAliveStatus then
+                                if sCiv ~= nil and sCiv ~= "" then
+                                    -- ② 必须是【城邦】—— 看领袖名是不是 LEADER_MINOR_CIV_*
+                                    local sLeader = ""
+                                    pcall(function()
+                                        sLeader = PlayerConfigurations[slot]:GetLeaderTypeName() or ""
+                                    end)
+                                    local bIsMinor = (string.sub(sLeader, 1, 16) == "LEADER_MINOR_CIV")
+                                    -- ③ 必须【还没活】
+                                    local bAlive = true
+                                    pcall(function() bAlive = Players[slot]:IsAlive() end)
+                                    -- ④ 状态必须不是"活着的城邦"那个值
+                                    local iSt = -1
+                                    pcall(function()
+                                        iSt = PlayerConfigurations[slot]:GetSlotStatus()
+                                    end)
+                                    if bIsMinor and (not bAlive) and iSt ~= iAliveStatus then
                                         tReusable[#tReusable + 1] = slot
                                     end
                                 end
@@ -530,6 +545,13 @@ function BBM_AssignStartingPlots.Create(args)
                         end)
                     end
                     print("BBM: [CSF extra] 可叫醒的预分配槽 = "..tostring(#tReusable).." 个")
+                    if #tReusable > 0 then
+                        local sList = ""
+                        for q = 1, math.min(8, #tReusable) do
+                            sList = sList .. tostring(tReusable[q]) .. " "
+                        end
+                        print("BBM: [CSF extra] 前几个: "..sList)
+                    end
 
                     local iMade = 0
                     local iReuse = 0
