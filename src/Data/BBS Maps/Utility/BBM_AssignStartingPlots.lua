@@ -428,6 +428,10 @@ function BBM_AssignStartingPlots.Create(args)
                 end)
                 if fallbackPlot ~= nil then
                     cs.Player:SetStartingPlot(fallbackPlot)
+                    -- ★ 标记：这是"超出 CCB 容量、由补丁兜底"的城邦。
+                    --   本模组据此把它们收走藏起来 —— 正好对应设计里的
+                    --   "额外多造的 N/2 个全部休眠供玩家建立"。
+                    pcall(function() cs.Player:SetProperty("CSF_EXTRA_DORMANT", 1) end)
                     local sx, sy = -1, -1
                     pcall(function() sx, sy = fallbackPlot:GetX(), fallbackPlot:GetY() end)
                     print("BBM: [CSF patch] no spawn left for CS "..tostring(i)..

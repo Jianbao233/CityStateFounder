@@ -619,7 +619,7 @@ end
 --     在开局【高级设置】里用官方【城邦选择器】勾一个大候选池、把城邦数量拉满，
 --     再把 CSF_KEEP_ACTIVE_ON_MAP 设成官方 DefaultCityStates 的数值。
 --     （详见 Data/CSF_MapSizes.sql 的说明）
-local CSF_KEEP_ACTIVE_ON_MAP = -2;
+local CSF_KEEP_ACTIVE_ON_MAP = -3;
 
 -- 按比例保留时，留在地图上的百分比（1..100）
 --   50 = 一半留在地图上、一半可建（**默认**）
@@ -906,6 +906,19 @@ local function CSF_ReserveCityStates()
     local iKeep;
     if CSF_KEEP_ACTIVE_ON_MAP == nil or CSF_KEEP_ACTIVE_ON_MAP == -1 then
         iKeep = iTotal;                                  -- 全留 = 纯原版
+    elseif CSF_KEEP_ACTIVE_ON_MAP == -3 then
+        -- ★ -3 模式：只藏【本模组额外造的 / 补丁兜底的】城邦，其余全留在地图上。
+        --   对应设计："玩家选 N 个出现在地图上，我们额外多造 N/2 个全部休眠"。
+        --   这里把 iKeep 设成"非额外城邦的数量"，下面就会正好只藏额外的那些。
+        iKeep = 0;
+        for _, iP in ipairs(tIDs) do
+            local bEx = CSF_Safe(function()
+                return Players[iP]:GetProperty("CSF_EXTRA_DORMANT");
+            end);
+            if bEx == nil or bEx == 0 then
+                iKeep = iKeep + 1;
+            end
+        end
     elseif CSF_KEEP_ACTIVE_ON_MAP == -2 then
         -- 按比例。用 floor 保证"至少藏 1 个"（否则小地图上功能会静默失效）
         local iPct = CSF_KEEP_ACTIVE_PERCENT or 50;
