@@ -133,7 +133,8 @@
         <LoadOrder>3000000</LoadOrder>
       </Properties>
       <Items>
-        <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
+        <File>Data/BBS Maps/Utility/BBM_CivilizationAssign.lua</File>
+      <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
       </Items>
     </ImportFiles>
   </InGameActions>
@@ -151,6 +152,7 @@
     <!-- ⚠️ 被 ImportFiles 覆盖的文件【必须】同时列在这里，否则不进 VFS。
          实测踩到过：只在 ImportFiles 里列、漏了 <Files> 时钩子静默失效。 -->
     <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
+    <File>Data/BBS Maps/Utility/BBM_CivilizationAssign.lua</File>
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
