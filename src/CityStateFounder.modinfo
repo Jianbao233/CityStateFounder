@@ -59,7 +59,7 @@
       <Properties>
         <LoadOrder>999999</LoadOrder>
       </Properties>
-      <File>Data/CSF_MapSizes.sql</File>
+      <File>Data/CSF_MapSizes.xml</File>
     </UpdateDatabase>
     <!-- ⭐ 单位图标（复用开拓者的图）—— 照官方 Australia.modinfo:36 的写法 -->
     <UpdateIcons id="CSF_Icons_FE">
