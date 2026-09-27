@@ -426,6 +426,211 @@ function BBM_AssignStartingPlots.Create(args)
             end
             
         end
+
+        -- =====================================================================
+        -- ===== CityStateFounder：额外创建 floor(N/2) 个休眠城邦（T-156）=====
+        -- =====================================================================
+        -- 用户的设计：
+        --   前端滑条保持【官方原值 X】，玩家自己选本局地图上出现多少城邦 N（≤ X）。
+        --   地图照常生成 N 个（观感与原版一致）。
+        --   我们再【额外】造 floor(N/2) 个城邦 —— 这些全部休眠、供建邦使者建立。
+        --   若城邦池不够 floor(N/2)，则取【池子总数 - N】。
+        --
+        -- 为什么在这里做：
+        --   · 位置在 CCB 放完 N 个【之后】→ 不干扰它的放置与平衡逻辑
+        --   · 仍在 GenerateMap() 之内 → 早于引擎的玩家初始化与颜色分配，
+        --     所以这些城邦是【引擎正式注册的玩家】（有颜色、有外交状态）
+        --
+        -- 为什么可以重复用"预分配槽里的城邦文明"：
+        --   引擎开局就把 48 个城邦文明预注册进槽位 15-53（status=5，未激活）。
+        --   本局只激活 N 个。剩下的那些【没有活着的玩家】，
+        --   拿它们新建玩家不会出现"两个同名城邦"。
+        --
+        -- 打标记 CSF_EXTRA_DORMANT = 1：
+        --   让 CSF_Gameplay.lua 的休眠逻辑【优先】收走这些城邦 ——
+        --   它们的出生点是兜底的（可能在南极角落），留在地图上会很难看。
+        do
+            local iBase = #BBS_Citystates
+            if iBase > 0 then
+                -- ① 收集本局【已用】的城邦文明
+                local tUsed = {}
+                for _, cs in pairs(BBS_Citystates) do
+                    if cs.CivilizationName ~= nil then tUsed[cs.CivilizationName] = true end
+                end
+
+                -- ② 找池子里【没被本局激活】的城邦文明
+                --    地图上下文没有 DB.ConfigurationQuery，走 GameInfo。
+                local tCand = {}
+                pcall(function()
+                    for row in GameInfo.Civilizations() do
+                        local sCiv = row.CivilizationType
+                        if sCiv ~= nil and not tUsed[sCiv] then
+                            local sLeader = "LEADER_MINOR_CIV_" ..
+                                string.gsub(sCiv, "^CIVILIZATION_", "")
+                            if GameInfo.Leaders[sLeader] ~= nil then
+                                tCand[#tCand + 1] = { Civ = sCiv, Leader = sLeader }
+                            end
+                        end
+                    end
+                end)
+
+                -- ③ 目标数量 = floor(N/2)，且不超过候选数
+                -- ⚠️ 硬限制：空闲玩家槽只有 54-61 共 8 个（0-53 被主文明与预分配城邦占用，
+--    62=自由城市、63=蛮族）。所以额外城邦最多 8 个 —— 下面的循环遇到
+--    AddPlayer 返回负数会自动停。要突破这个上限，需要去"激活"槽位 15-53 里
+--    那些 status=5 的预分配城邦（引擎开局就把 48 个城邦预注册在那里）。
+                local iWant = math.floor(iBase / 2)
+                if iWant > #tCand then iWant = #tCand end
+                print("BBM: [CSF extra] base CS = "..tostring(iBase)..
+                      ", pool candidates = "..tostring(#tCand)..
+                      ", target extra = "..tostring(iWant))
+
+                local pm = nil
+                pcall(function()
+                    pm = WorldBuilder and WorldBuilder.PlayerManager
+                         and WorldBuilder.PlayerManager()
+                end)
+
+                if pm == nil then
+                    print("BBM: [CSF extra] WorldBuilder.PlayerManager 不可用，跳过额外创建")
+                else
+                    -- 空闲槽用尽时，去"叫醒"预分配槽（15-53）里那些还没激活的城邦。
+                    --   引擎开局就把 48 个城邦预注册在这些槽位（status 与活着的城邦不同），
+                    --   本局只激活 N 个。剩下的只要把槽位状态改成"和活着的城邦一样"，
+                    --   引擎的玩家初始化就会把它们当成正式玩家。
+                    --
+                    -- ⚠️ 不依赖 SlotStatus 枚举的具体数值 —— 运行时从一个【活着的城邦】
+                    --    读它的状态值，再写过去。枚举值只在 Lua 侧，DLL 里查不到。
+                    local iAliveStatus = nil
+                    pcall(function()
+                        local tAlive = PlayerManager.GetAliveMinorIDs()
+                        if tAlive ~= nil and tAlive[1] ~= nil then
+                            iAliveStatus = PlayerConfigurations[tAlive[1]]:GetSlotStatus()
+                        end
+                    end)
+                    print("BBM: [CSF extra] 空闲槽用尽；活着的城邦槽位状态 = "..
+                          tostring(iAliveStatus))
+
+                    local tReusable = {}   -- 可复用的预分配槽（status 非空、非活、有城邦文明）
+                    if iAliveStatus ~= nil then
+                        pcall(function()
+                            local tAliveSet = {}
+                            for _, pid in ipairs(PlayerManager.GetAliveMinorIDs()) do
+                                tAliveSet[pid] = true
+                            end
+                            for slot = 0, 63 do
+                                local sCiv = PlayerConfigurations[slot]:GetCivilizationTypeName()
+                                if sCiv ~= nil and sCiv ~= "" and not tAliveSet[slot] then
+                                    local iSt = PlayerConfigurations[slot]:GetSlotStatus()
+                                    if iSt ~= iAliveStatus then
+                                        tReusable[#tReusable + 1] = slot
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                    print("BBM: [CSF extra] 可叫醒的预分配槽 = "..tostring(#tReusable).." 个")
+
+                    local iMade = 0
+                    local iReuse = 0
+                    for k = 1, iWant do
+                        local cand = tCand[k]
+                        local iNew = nil
+
+                        -- 先试空闲槽（AddPlayer）
+                        local bOK = pcall(function() iNew = pm:AddPlayer(true) end)
+                        if bOK and iNew ~= nil and iNew >= 0 then
+                            pcall(function()
+                                pm:SetPlayerLeader(iNew, cand.Leader, cand.Civ,
+                                                   "CIVILIZATION_LEVEL_CITY_STATE")
+                            end)
+                        else
+                            -- 空闲槽没了 → 叫醒一个预分配槽
+                            iReuse = iReuse + 1
+                            local slot = tReusable[iReuse]
+                            if slot == nil then
+                                print("BBM: [CSF extra] 预分配槽也用尽了（第 "..
+                                      tostring(k).." 个），停止")
+                                break
+                            end
+                            -- 这个槽里【本来就有城邦文明】，所以不需要 SetPlayerLeader，
+                            -- 只要把状态改成"和活着的城邦一样"。
+                            local bSt = pcall(function()
+                                PlayerConfigurations[slot]:SetSlotStatus(iAliveStatus)
+                            end)
+                            if not bSt then
+                                print("BBM: [CSF extra] SetSlotStatus 失败 slot="..
+                                      tostring(slot).."，停止")
+                                break
+                            end
+                            iNew = slot
+                            pcall(function()
+                                cand.Civ = PlayerConfigurations[slot]:GetCivilizationTypeName()
+                            end)
+                            print("BBM: [CSF extra] 叫醒预分配槽 "..tostring(slot)..
+                                  " -> "..tostring(cand.Civ))
+                        end
+
+                        if iNew == nil or iNew < 0 then
+                            print("BBM: [CSF extra] 第 "..tostring(k).." 个拿不到槽位，停止")
+                            break
+                        end
+
+                        -- ④ 给一块【像样】的兜底出生点：可通行、且有可通行的邻格，
+                        --    避开地图最外两圈（那里常是极地/冰封死地）
+                        local fallbackPlot = nil
+                        local bFound = false
+                        pcall(function()
+                            for y = 2, BBM_HexMap.height - 3 do
+                                for x = 2, BBM_HexMap.width - 3 do
+                                    local h = BBM_HexMap:GetHexInMap(x, y)
+                                    if h ~= nil and h.IsCivStartingPlot == false
+                                       and h:IsImpassable() == false then
+                                        -- 邻格至少要有一个能通行
+                                        local bHasExit = false
+                                        for d = 0, 5 do
+                                            local nb = Map.GetAdjacentPlot(x, y, d)
+                                            if nb ~= nil and nb:IsImpassable() == false then
+                                                bHasExit = true
+                                                break
+                                            end
+                                        end
+                                        if bHasExit then
+                                            fallbackPlot = h.Plot
+                                            h.IsCivStartingPlot = true
+                                            bFound = true
+                                            break
+                                        end
+                                    end
+                                end
+                                if bFound then break end
+                            end
+                        end)
+
+                        if fallbackPlot ~= nil then
+                            pcall(function()
+                                Players[iNew]:SetStartingPlot(fallbackPlot)
+                                -- ★ 标记：让 CSF_Gameplay 优先把这类城邦收走藏起来
+                                Players[iNew]:SetProperty("CSF_EXTRA_DORMANT", 1)
+                            end)
+                            local sx, sy = -1, -1
+                            pcall(function() sx, sy = fallbackPlot:GetX(), fallbackPlot:GetY() end)
+                            iMade = iMade + 1
+                            print("BBM: [CSF extra] #"..tostring(k).." slot="..tostring(iNew)..
+                                  " "..tostring(cand.Civ)..
+                                  " -> plot ("..tostring(sx)..","..tostring(sy)..")")
+                        else
+                            print("BBM: [CSF extra] #"..tostring(k).." slot="..tostring(iNew)..
+                                  " 找不到空闲陆地格，停止")
+                            break
+                        end
+                    end
+                    print("BBM: [CSF extra] done: 额外创建 "..tostring(iMade).." 个休眠城邦")
+                end
+            end
+        end
+        -- ===== CityStateFounder 额外创建结束 =====
+
         Game:SetProperty("BBM_RESPAWN", true)
         print("End Assign Centroid",  os.date("%c"))
     else

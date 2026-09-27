@@ -922,7 +922,30 @@ local function CSF_ReserveCityStates()
 
     local iWantReserve = iTotal - iKeep;
 
+    -- ⭐ 排序：优先收走【地图补丁额外造的】城邦（带 CSF_EXTRA_DORMANT 标记）。
+    --    为什么：那些城邦的出生点是兜底给的（可能挤在地图角落、甚至被地形困住），
+    --    留在地图上会很难看、也建不出像样的城。收走它们既解决观感，
+    --    又正好把它们变成"可建"的。
+    local tOrdered = {};
+    local tExtra, tNormal = {}, {};
     for _, iPlayer in ipairs(tIDs) do
+        local bExtra = CSF_Safe(function()
+            return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
+        end);
+        if bExtra ~= nil and bExtra ~= 0 then
+            tExtra[#tExtra + 1] = iPlayer;
+        else
+            tNormal[#tNormal + 1] = iPlayer;
+        end
+    end
+    for _, v in ipairs(tExtra) do tOrdered[#tOrdered + 1] = v end
+    for _, v in ipairs(tNormal) do tOrdered[#tOrdered + 1] = v end
+    if #tExtra > 0 then
+        print("[CSF] reserve: 其中 " .. tostring(#tExtra) ..
+              " 个是本模组额外造的（优先收走）");
+    end
+
+    for _, iPlayer in ipairs(tOrdered) do
         if iDone >= iWantReserve then break end
 
         -- 已经是预留的就跳过
