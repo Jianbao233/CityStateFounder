@@ -970,33 +970,30 @@ local function CSF_ReserveCityStates()
         if iDone >= iWantReserve then break end
 
         -- ⛔ 硬保险：本模组额外造的城邦【永不】被藏起来。
-        --    实测：对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION
-        --    读 0x798），因为它们不是引擎自己初始化的玩家。
-        --    把它们放在顺序最后还不够 —— 比例调低时（比如 0%）仍会轮到它们，
-        --    所以这里直接跳过，彻底杜绝。
+        --    实测：对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION）。
+        --    ⚠️ 这里【不能用 goto】—— Civ6 是 Lua 5.1，goto 是 5.2 才有的，
+        --       写 goto 会让整个脚本 Syntax Error、整份 CSF_Gameplay.lua 不加载
+        --       （实测踩到过，代价是休眠机制全废）。所以用嵌套 if。
         local bIsExtra = CSF_Safe(function()
             return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
         end);
-        if bIsExtra ~= nil and bIsExtra ~= 0 then
-            goto continue_reserve;
-        end
+        if bIsExtra == nil or bIsExtra == 0 then
 
-        -- 已经是预留的就跳过
-        if not CSF_IsReserved(iPlayer) then
-            local iCities = CSF_Safe(function()
-                return Players[iPlayer]:GetCities():GetCount();
-            end) or 0;
+            -- 已经是预留的就跳过
+            if not CSF_IsReserved(iPlayer) then
+                local iCities = CSF_Safe(function()
+                    return Players[iPlayer]:GetCities():GetCount();
+                end) or 0;
 
-            -- 只对【还没建城】的城邦动手（已经建城的抢不回来了）
-            if iCities == 0 then
-                if CSF_SendPlayerOffMap(iPlayer) then
-                    m_tReserved[iPlayer] = true;
-                    iDone = iDone + 1;
+                -- 只对【还没建城】的城邦动手（已经建城的抢不回来了）
+                if iCities == 0 then
+                    if CSF_SendPlayerOffMap(iPlayer) then
+                        m_tReserved[iPlayer] = true;
+                        iDone = iDone + 1;
+                    end
                 end
             end
         end
-
-        ::continue_reserve::
     end
 
     print("[CSF] reserve done: " .. tostring(iDone) .. " / " .. tostring(iTotal) ..

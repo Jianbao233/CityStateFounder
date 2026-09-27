@@ -74,15 +74,19 @@
     <UpdateIcons id="CSF_Icons_FE">
       <File>Data/CSF_Icons.xml</File>
     </UpdateIcons>
-      <!-- ⭐ 前端城邦选择器：滑条显示 N，实际写入 N + floor(N/2)
-         （CityStatePicker 是一个 UI 上下文，所以用 ReplaceUIScript） -->
-    <ReplaceUIScript id="CSF_REPLACE_CITYSTATEPICKER">
+      <!-- ⭐ 前端城邦选择器：滑条显示 N，实际写入 N + floor(N/2)。
+         覆盖方式用 ImportFiles 按【文件名】解析（文件名就是 CityStatePicker.lua），
+         这是 DL 等大 mod 覆盖 UI 文件的成熟写法。
+         ⚠️ 实测：ReplaceUIScript + LuaContext=CityStatePicker 没生效
+            （Modding.log 里连这条动作都没出现），所以改成 ImportFiles。 -->
+    <ImportFiles id="CSF_CITYSTATEPICKER_IMPORT">
       <Properties>
-        <LoadOrder>500000</LoadOrder>
-        <LuaContext>CityStatePicker</LuaContext>
-        <LuaReplace>UI/CSF_CityStatePicker.lua</LuaReplace>
+        <LoadOrder>2000000</LoadOrder>
       </Properties>
-    </ReplaceUIScript>
+      <Items>
+        <File>UI/CityStatePicker.lua</File>
+      </Items>
+    </ImportFiles>
   </FrontEndActions>
 
   <InGameActions>
@@ -175,7 +179,7 @@
          而且和 CCB Maps 同用时需要先实测地图容量（详见该文件内的说明）。 -->
     <File>Data/CSF_MapSizes.xml</File>
     <File>Data/CSF_CityStateCountRange.xml</File>
-    <File>UI/CSF_CityStatePicker.lua</File>
+    <File>UI/CityStatePicker.lua</File>
     <!-- ⚠️ 被 ImportFiles 覆盖的文件【必须】同时列在这里，否则不进 VFS。
          实测踩到过：只在 ImportFiles 里列、漏了 <Files> 时钩子静默失效。 -->
     <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
