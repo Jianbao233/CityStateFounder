@@ -511,8 +511,14 @@ function BBM_AssignStartingPlots.Create(args)
                     print("BBM: [CSF extra] 空闲槽用尽；活着的城邦槽位状态 = "..
                           tostring(iAliveStatus))
 
+                    -- ⛔ 实测结论（2026-09-27）：这条路【走不通】。
+                    --    SetSlotStatus 对预分配城邦槽（如槽 26）直接失败，
+                    --    即使筛选条件已经正确（只挑未存活的城邦）。
+                    --    日志：SetSlotStatus 失败 slot=26，停止
+                    -- 所以默认关闭。额外城邦只从【空闲槽 54-61】取，上限 8 个。
+                    local CSF_WAKE_RESERVED = false;
                     local tReusable = {}   -- 可复用的预分配槽
-                    if iAliveStatus ~= nil then
+                    if CSF_WAKE_RESERVED and iAliveStatus ~= nil then
                         pcall(function()
                             for slot = 0, 63 do
                                 -- ⚠️⚠️ 必须【三重】筛选，缺一不可。

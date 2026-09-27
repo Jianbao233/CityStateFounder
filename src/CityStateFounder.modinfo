@@ -128,13 +128,20 @@
          出生点用完时会索引 nil 直接崩掉地图生成）。
          正常情况（数量在地图容量内）行为与原版完全一致。
          注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。 -->
-    <ImportFiles id="CSF_CCB_SPAWN_FIX">
+    <ImportFiles id="CSF_CCB_FIX_SPAWN">
       <Properties>
         <LoadOrder>3000000</LoadOrder>
       </Properties>
       <Items>
+        <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
+      </Items>
+    </ImportFiles>
+    <ImportFiles id="CSF_CCB_FIX_RIVER">
+      <Properties>
+        <LoadOrder>3000001</LoadOrder>
+      </Properties>
+      <Items>
         <File>Data/BBS Maps/Utility/BBM_CivilizationAssign.lua</File>
-      <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
       </Items>
     </ImportFiles>
   </InGameActions>
