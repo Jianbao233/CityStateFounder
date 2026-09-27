@@ -81,7 +81,7 @@
         <LoadOrder>2000000</LoadOrder>
       </Properties>
       <Items>
-        <File>UI/GameSetupLogic.lua</File>
+        <File>UI/FrontEnd/GameSetupLogic.lua</File>
       </Items>
     </ImportFiles>
     <UpdateDatabase id="CSF_Units" criteria="CSF_XP2">
@@ -108,7 +108,7 @@
       </Properties>
       <Items>
         <File>UI/CSF_Panel.xml</File>
-    <File>UI/GameSetupLogic.lua</File>
+    <File>UI/FrontEnd/GameSetupLogic.lua</File>
         <File>UI/CSF_Panel.lua</File>
       </Items>
     </ImportFiles>
@@ -119,7 +119,7 @@
       </Properties>
       <Items>
         <File>UI/CSF_Panel.xml</File>
-    <File>UI/GameSetupLogic.lua</File>
+    <File>UI/FrontEnd/GameSetupLogic.lua</File>
       </Items>
     </AddUserInterfaces>
 
@@ -182,7 +182,7 @@
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
-    <File>UI/GameSetupLogic.lua</File>
+    <File>UI/FrontEnd/GameSetupLogic.lua</File>
     <File>UI/CSF_Panel.lua</File>
     <File>UI/CSF_UnitPanel.lua</File>
     <File>Text/CSF_Text.xml</File>
