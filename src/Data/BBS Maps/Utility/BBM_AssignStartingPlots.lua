@@ -380,21 +380,50 @@ function BBM_AssignStartingPlots.Create(args)
                 -- 兜底城邦拿到的是不同的格子。
                 --
                 -- 这些城邦挤在一起无所谓 —— 它们最终会被本模组收走藏起来。
+                --
+                -- ⚠️ 与下面"额外城邦"那段同一个教训：必须【是陆地】且从地图中心找，
+                --    否则会落在北极海洋上 → 加载后约 30 秒静默退出。
                 local fallbackPlot = nil
                 local bFound = false
                 pcall(function()
-                    for y = 0, BBM_HexMap.height - 1 do
-                        for x = 0, BBM_HexMap.width - 1 do
-                            local h = BBM_HexMap:GetHexInMap(x, y)
-                            if h ~= nil and h.IsCivStartingPlot == false
-                               and h:IsImpassable() == false then
-                                fallbackPlot = h.Plot
-                                h.IsCivStartingPlot = true   -- ★ 占住，避免下一个重复
-                                bFound = true
-                                break
-                            end
-                        end
+                    local iW, iH = BBM_HexMap.width, BBM_HexMap.height
+                    local iCx, iCy = math.floor(iW / 2), math.floor(iH / 2)
+                    local iMaxR = math.max(iW, iH)
+                    for r = 0, iMaxR do
                         if bFound then break end
+                        for dx = -r, r do
+                            for dy = -r, r do
+                                if (math.abs(dx) == r or math.abs(dy) == r) then
+                                    local x, y = iCx + dx, iCy + dy
+                                    if x >= 1 and x <= iW - 2 and y >= 1 and y <= iH - 2 then
+                                        local h = BBM_HexMap:GetHexInMap(x, y)
+                                        if h ~= nil and h.IsCivStartingPlot == false
+                                           and h:IsImpassable() == false then
+                                            local p = h.Plot
+                                            local bWater = true
+                                            pcall(function() bWater = p:IsWater() end)
+                                            if not bWater then
+                                                local iLand = 0
+                                                for d = 0, 5 do
+                                                    local nb = Map.GetAdjacentPlot(x, y, d)
+                                                    if nb ~= nil and nb:IsWater() == false
+                                                       and nb:IsImpassable() == false then
+                                                        iLand = iLand + 1
+                                                    end
+                                                end
+                                                if iLand >= 4 then
+                                                    fallbackPlot = p
+                                                    h.IsCivStartingPlot = true   -- ★ 占住，避免下一个重复
+                                                    bFound = true
+                                                    break
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            if bFound then break end
+                        end
                     end
                 end)
                 if fallbackPlot ~= nil then
@@ -458,7 +487,7 @@ function BBM_AssignStartingPlots.Create(args)
             --    额外城邦被优先藏起来），但游戏在【加载完成后约 30 秒】静默退出，
             --    没有崩溃转储、没有 Windows 事件、没有 Lua 报错。
             --    为定位原因，暂时设 0 做隔离实验。
-            local CSF_EXTRA_RATIO = 0;
+            local CSF_EXTRA_RATIO = 0.5;
 
             local iBase = #BBS_Citystates
             if iBase > 0 and CSF_EXTRA_RATIO ~= nil and CSF_EXTRA_RATIO > 0 then
@@ -614,34 +643,65 @@ function BBM_AssignStartingPlots.Create(args)
                             break
                         end
 
-                        -- ④ 给一块【像样】的兜底出生点：可通行、且有可通行的邻格，
-                        --    避开地图最外两圈（那里常是极地/冰封死地）
+                        -- ④ 给一块【像样】的兜底出生点。
+                        --
+                        -- ⚠️⚠️ 实测教训（2026-09-27）：第一版只判了 IsImpassable() == false，
+                        --    而且从 y=2（地图最北端）开始扫 → 6 个额外城邦全被放在
+                        --    (44,2)(45,2)(46,2)... 这种【北极海洋】格上。
+                        --    后果：地图生成不崩、加载也不崩，但【加载后约 30 秒】游戏静默退出
+                        --    （无 dump、无事件日志、无 Lua 报错）—— 那是 AI 首次行动、
+                        --    开始处理这些"坐在水上、没有可建城陆地"的城邦的时候。
+                        --
+                        -- 现在的三条硬要求：
+                        --   ① 必须是【陆地】（Plot:IsWater() == false）
+                        --   ② 邻格至少 4 块是陆地（够建一座城）
+                        --   ③ 从【地图中心】向外一圈圈找（避开两极）
                         local fallbackPlot = nil
                         local bFound = false
                         pcall(function()
-                            for y = 2, BBM_HexMap.height - 3 do
-                                for x = 2, BBM_HexMap.width - 3 do
-                                    local h = BBM_HexMap:GetHexInMap(x, y)
-                                    if h ~= nil and h.IsCivStartingPlot == false
-                                       and h:IsImpassable() == false then
-                                        -- 邻格至少要有一个能通行
-                                        local bHasExit = false
-                                        for d = 0, 5 do
-                                            local nb = Map.GetAdjacentPlot(x, y, d)
-                                            if nb ~= nil and nb:IsImpassable() == false then
-                                                bHasExit = true
-                                                break
+                            local iW, iH = BBM_HexMap.width, BBM_HexMap.height
+                            local iCx, iCy = math.floor(iW / 2), math.floor(iH / 2)
+                            local iMaxR = math.max(iW, iH)
+
+                            for r = 0, iMaxR do
+                                if bFound then break end
+                                -- 第 r 圈：沿方环走一圈
+                                for dx = -r, r do
+                                    for dy = -r, r do
+                                        -- 只处理环上的点（不是整个方块）
+                                        if (math.abs(dx) == r or math.abs(dy) == r) then
+                                            local x, y = iCx + dx, iCy + dy
+                                            if x >= 1 and x <= iW - 2 and y >= 1 and y <= iH - 2 then
+                                                local h = BBM_HexMap:GetHexInMap(x, y)
+                                                if h ~= nil and h.IsCivStartingPlot == false
+                                                   and h:IsImpassable() == false then
+                                                    local p = h.Plot
+                                                    -- ① 必须是陆地
+                                                    local bWater = true
+                                                    pcall(function() bWater = p:IsWater() end)
+                                                    if not bWater then
+                                                        -- ② 邻格至少 4 块陆地
+                                                        local iLand = 0
+                                                        for d = 0, 5 do
+                                                            local nb = Map.GetAdjacentPlot(x, y, d)
+                                                            if nb ~= nil and nb:IsWater() == false
+                                                               and nb:IsImpassable() == false then
+                                                                iLand = iLand + 1
+                                                            end
+                                                        end
+                                                        if iLand >= 4 then
+                                                            fallbackPlot = p
+                                                            h.IsCivStartingPlot = true
+                                                            bFound = true
+                                                            break
+                                                        end
+                                                    end
+                                                end
                                             end
                                         end
-                                        if bHasExit then
-                                            fallbackPlot = h.Plot
-                                            h.IsCivStartingPlot = true
-                                            bFound = true
-                                            break
-                                        end
                                     end
+                                    if bFound then break end
                                 end
-                                if bFound then break end
                             end
                         end)
 
