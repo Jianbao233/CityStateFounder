@@ -487,7 +487,25 @@ function BBM_AssignStartingPlots.Create(args)
             --    额外城邦被优先藏起来），但游戏在【加载完成后约 30 秒】静默退出，
             --    没有崩溃转储、没有 Windows 事件、没有 Lua 报错。
             --    为定位原因，暂时设 0 做隔离实验。
-            local CSF_EXTRA_RATIO = 0.5;
+            -- ⛔⛔ 实测结论（2026-09-27）：这条路【根本走不通】，永久关闭。
+            --   原因：引擎开局就把【48 个城邦文明全部预注册】到槽位 15-53，
+            --   城邦池里【没有任何空闲文明】可分给新玩家。
+            --   我们用 AddPlayer + SetPlayerLeader 挑"没在存活列表里"的文明，
+            --   但那些文明正躺在预分配槽里 —— 于是同一个文明出现在两个槽里。
+            --   引擎自己的检查（DLL 里的字符串）会因此失败：
+            --     "Civilization already used: Player %i - %s"
+            --     "Leader already used: Player %i - %s"
+            --   后果是【原生崩溃】（EXCEPTION_ACCESS_VIOLATION），
+            --   而且崩在地图生成之后的玩家初始化阶段，连 LoadScreen 都到不了。
+            --
+            --   试过的三条路都失败：
+            --     ① 北极海洋出生点 → 加载后 30 秒静默退出
+            --     ② 地图中部陆地 + 分散 → 玩家初始化阶段原生崩溃
+            --     ③ 不藏它们 → 同样崩（崩点更早，说明与休眠无关）
+            --
+            -- ✅ 唯一可行的是【引擎自己的机制】：把 MaxCityStates 抬高，
+            --    引擎就会真的多激活几个预分配槽 —— 那是它认可的方式。
+            local CSF_EXTRA_RATIO = 0;
 
             local iBase = #BBS_Citystates
             if iBase > 0 and CSF_EXTRA_RATIO ~= nil and CSF_EXTRA_RATIO > 0 then
