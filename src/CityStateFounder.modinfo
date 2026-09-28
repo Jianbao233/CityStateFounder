@@ -21,12 +21,12 @@
       <zh_Hans_CN>城邦缔造者</zh_Hans_CN>
     </Text>
     <Text id="LOC_CSF_MOD_TEASER">
-      <en_US>Let the player place City-States on the map.</en_US>
-      <zh_Hans_CN>让玩家亲手把城邦放上地图。</zh_Hans_CN>
+      <en_US>Found City-States wherever you want.</en_US>
+      <zh_Hans_CN>随心所欲建建邦</zh_Hans_CN>
     </Text>
     <Text id="LOC_CSF_MOD_DESCRIPTION">
-      <en_US>Adds the City-State Envoy unit, which cannot found a normal city but instead founds a City-State. A panel lists the City-States available in this game (icon / name / suzerain bonus) for you to choose from.</en_US>
-      <zh_Hans_CN>新增「建邦使节」单位：它不能建立普通城市，而是建立一个城邦。配套面板会列出本局可用的城邦（图标 / 名称 / 宗主加成）供你选择。</zh_Hans_CN>
+      <en_US>Adds the City-State Envoy unit. It cannot found a normal city - instead it summons a City-State that is not yet present on the map, right where it stands. A panel lists the City-States available in this game (icon / name / suzerain bonus) for you to choose from.</en_US>
+      <zh_Hans_CN>新增「建邦使节」单位：不可建立普通城市，使用后原地召唤一个场上不存在的城邦。配套面板会列出本局可用的城邦（图标 / 名称 / 宗主加成）供你选择。</zh_Hans_CN>
     </Text>
   </LocalizedText>
 
