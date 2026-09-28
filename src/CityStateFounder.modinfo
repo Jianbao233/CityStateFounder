@@ -61,16 +61,12 @@
       </Properties>
       <File>Data/CSF_MapSizes.xml</File>
     </UpdateDatabase>
-    <!-- ⭐ 把滑条【显示】的上限映射回官方 X（标准图 18）。
-         只影响 Queries 表里 CityStateCountRange 这条查询 —— 也就是 UI；
-         引擎实际允许的上限仍是 CSF_MapSizes.xml 抬高的 X + X/2（标准图 27）。
-         两者配合：滑条最高显示 18，但引擎能创建到 27。 -->
-    <UpdateDatabase id="CSF_CityStateCountRange">
-      <Properties>
-        <LoadOrder>999999</LoadOrder>
-      </Properties>
-      <File>Data/CSF_CityStateCountRange.xml</File>
-    </UpdateDatabase>
+    <!-- ⚠️ 这里原本还挂了一条 CSF_CityStateCountRange，把滑条的【显示】上限映射回
+         官方 X（标准图 18）—— 已【移除】。
+         原因：滑条值和引擎创建数是【同一个值】，压住滑条就一起压住了引擎。
+         想做到"滑条显示 18 / 引擎创建 27"必须拦参数写入，而参数值在拖动那一刻
+         就落库、且游戏会缓存上次设置 → 任何钩子都可能不触发（详见 InGameActions
+         里的说明）。所以 A 方案就是【让滑条直接能拉到 X + X/2，玩家自己拉满】。 -->
     <!-- ⭐ 单位图标（复用开拓者的图）—— 照官方 Australia.modinfo:36 的写法 -->
     <UpdateIcons id="CSF_Icons_FE">
       <File>Data/CSF_Icons.xml</File>
