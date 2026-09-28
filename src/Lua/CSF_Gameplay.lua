@@ -977,15 +977,28 @@ local function CSF_ReserveCityStates()
     for _, iPlayer in ipairs(tOrdered) do
         if iDone >= iWantReserve then break end
 
-        -- ⛔ 硬保险：本模组额外造的城邦【永不】被藏起来。
-        --    实测：对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION）。
+        -- ⛔ 硬保险：本模组额外造的城邦默认【不藏】。
+        --    历史原因：早期额外城邦是用 WorldBuilder 的 AddPlayer 造的，
+        --    对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION）。
+        --    现在额外城邦是【引擎自己激活】出来的，理论上可以安全隐藏 ——
+        --    所以 -3 模式（就是要藏它们）下这个保险不生效。
+        --
+        --    ⚠️ 实测教训：-3 模式和这个保险曾经互相打架 ——
+        --       -3 算出"要藏 N 个额外城邦"，保险又把它们全跳过，
+        --       结果一个都没藏，地图中间全是它们派出来的开拓者。
+        --
         --    ⚠️ 这里【不能用 goto】—— Civ6 是 Lua 5.1，goto 是 5.2 才有的，
-        --       写 goto 会让整个脚本 Syntax Error、整份 CSF_Gameplay.lua 不加载
-        --       （实测踩到过，代价是休眠机制全废）。所以用嵌套 if。
-        local bIsExtra = CSF_Safe(function()
-            return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
-        end);
-        if bIsExtra == nil or bIsExtra == 0 then
+        --       写 goto 会让整个脚本 Syntax Error、整份 CSF_Gameplay.lua 不加载。
+        local bSkipExtra = false;
+        if CSF_KEEP_ACTIVE_ON_MAP ~= -3 then
+            local bIsExtra = CSF_Safe(function()
+                return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
+            end);
+            if bIsExtra ~= nil and bIsExtra ~= 0 then
+                bSkipExtra = true;
+            end
+        end
+        if not bSkipExtra then
 
             -- 已经是预留的就跳过
             if not CSF_IsReserved(iPlayer) then
