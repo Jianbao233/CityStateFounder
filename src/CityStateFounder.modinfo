@@ -78,22 +78,16 @@
   </FrontEndActions>
 
   <InGameActions>
-    <!-- ⭐ 城邦数量：滑条选 N，实际写 N + floor(N/2)（多出的由本模组收走供建立）
-         ⚠️ 覆盖 GameSetupLogic.lua，挂在 Parameters_Config_EndWrite 上 ——
-            那是【把配置交给引擎之前】的最后一个钩子，参数里已是玩家选好的值。
-         ⚠️ 试过但无效的两条路（都记下来免得再走）：
-            · CityStatePicker.lua —— 只在点开选择器时才加载，玩家在高级设置
-              界面设数量时它根本没跑
-            · 把 ImportFiles 放 FrontEndActions —— 该动作类型在那里不会被应用
-              （Modding.log 里连动作名都不出现） -->
-    <ImportFiles id="CSF_SETUPLOGIC_IMPORT">
-      <Properties>
-        <LoadOrder>2000000</LoadOrder>
-      </Properties>
-      <Items>
-        <File>UI/FrontEnd/GameSetupLogic.lua</File>
-      </Items>
-    </ImportFiles>
+    <!-- ⚠️ 这里原本覆盖 UI/FrontEnd/GameSetupLogic.lua 来拦"滑条选 N、实际写 N+N/2"，
+         已放弃并移除。原因（记下来免得再走）：
+           · 参数值在【拖动滑条那一刻】就写进配置库了；游戏还会缓存上次的开局设置，
+             重新打开设置时数量已经是原值 → SetParameterValue 根本不被调用
+             → 任何钩子都不会跑，引擎按缓存值创建城邦。
+           · 试过的三条路都因此失效：Parameters_Config_EndWrite（改内存不回写库）、
+             GameParameters_PostProcess（同上）、包 SetupParameters:SetParameterValue
+             （只在该参数真的被改变时才触发 —— 正是缓存命中时跳过的情形）。
+         → 结论：滑条显示 18 / 实际 27 这一层做不到；改成
+           【滑条直接能拉到 X + X/2，玩家自己拉满】，见 Data/CSF_MapSizes.xml。 -->
     <UpdateDatabase id="CSF_Units" criteria="CSF_XP2">
       <File>Data/CSF_Units.sql</File>
     </UpdateDatabase>
@@ -190,7 +184,6 @@
     <File>Data/CSF_Units.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
-    <File>UI/FrontEnd/GameSetupLogic.lua</File>
     <File>UI/CSF_Panel.lua</File>
     <File>UI/CSF_UnitPanel.lua</File>
     <File>Text/CSF_Text.xml</File>
