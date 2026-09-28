@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Mod id="DE55664B-313E-451F-9488-23F168359B9D" version="1.0.1">
+<Mod id="DE55664B-313E-451F-9488-23F168359B9D" version="1.0.2">
   <Properties>
     <Name>LOC_CSF_MOD_NAME</Name>
     <Description>LOC_CSF_MOD_DESCRIPTION</Description>
@@ -17,8 +17,8 @@
          CCB 系列的 <Name> 直接写明文，所以它们不需要。） -->
   <LocalizedText>
     <Text id="LOC_CSF_MOD_NAME">
-      <en_US>City-State Founder</en_US>
-      <zh_Hans_CN>城邦缔造者</zh_Hans_CN>
+      <en_US>City-State Founder v1.0.2</en_US>
+      <zh_Hans_CN>城邦缔造者 v1.0.2</zh_Hans_CN>
     </Text>
     <Text id="LOC_CSF_MOD_TEASER">
       <en_US>Found City-States wherever you want.</en_US>

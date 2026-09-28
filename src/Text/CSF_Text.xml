@@ -2,10 +2,10 @@
 <GameData>
   <LocalizedText>
     <Replace Tag="LOC_CSF_MOD_NAME" Language="zh_Hans_CN">
-      <Text>城邦缔造者</Text>
+      <Text>城邦缔造者 v1.0.2</Text>
     </Replace>
     <Replace Tag="LOC_CSF_MOD_NAME" Language="en_US">
-      <Text>City-State Founder</Text>
+      <Text>City-State Founder v1.0.2</Text>
     </Replace>
     <Replace Tag="LOC_CSF_MOD_DESCRIPTION" Language="zh_Hans_CN">
       <Text>新增「建邦使节」单位：它不能建立普通城市，而是建立一个城邦。配套面板会列出本局可用的城邦（图标 / 名称 / 宗主加成）供你选择。</Text>
