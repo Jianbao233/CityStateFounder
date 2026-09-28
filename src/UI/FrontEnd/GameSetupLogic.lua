@@ -62,42 +62,53 @@ end
 --       由本模组收走藏起来，供玩家的建邦使者建立。
 --
 -- 为什么挂在这里（实测踩了很久才定下来）：
---   · Parameter_PostProcess 只在【构建参数】时跑一次（SetupParameters.lua:1007
---     的 Query Parameters 阶段），那时 p.Value 还是默认值 ——
---     在那里改，玩家一拖滑条就被覆盖。不行。
---   · 前端选择器里的滑条（CityStatePicker.lua）只在【点开选择器】时才加载，
---     而玩家是在【高级设置】界面设数量 —— 那个滑条由通用参数系统生成，
---     覆盖选择器根本拦不到。
---   · Config_EndWrite 是【把整套配置交给引擎】之前的最后一个钩子 ——
---     参数里已经是玩家选好的值，在这里改才有效。
+--   · Config_EndWrite 是【把整套配置交给引擎】之前的最后一个钩子，
+--     参数里已是玩家选好的值 —— 玩家拖过滑条时靠它。
+--     ⚠️ 但它【只在配置被写入时】才跑：游戏会缓存上次的开局设置，
+--        直接开局（不动任何设置）就不会写配置 → 钩子根本不跑。
+--        （实测：同一份代码，拖过滑条的局 18→27 生效，直接开的局没反应。）
+--   · Parameter_PostProcess 在【构建参数】阶段必跑（SetupParameters.lua:1007
+--     的 Query Parameters 阶段），而且此时 p.Value 已经是从配置读出来的
+--     玩家值（被改的是 p.DefaultValue，不是 p.Value）—— 所以缓存路径靠它。
+--   · 前端选择器里的滑条（CityStatePicker.lua）只在点开选择器时才加载，
+--     玩家在高级设置界面设数量时它不跑 —— 覆盖它没用。
 --
--- 幂等：Config_EndWrite 可能被调用多次（每次配置变化都会），
---      所以用参数上的标记位保证只放大一次。
-local CSF_CITYSTATE_GROWTH_APPLIED = "__csfGrowthApplied";
+-- 两个钩子都挂上，两条路径就都覆盖了：
+--   直接开局（缓存设置） → Parameter_PostProcess
+--   拖过滑条            → Config_EndWrite
+--
+-- 幂等：记下【上一次放大后的值】。若当前值就等于它，说明已经放过了，跳过；
+--      若玩家又改了值，则重新放大。这样反复调用 / 反复拖滑条都不会越滚越大。
+local CSF_CITYSTATE_LAST_GROWN = "__csfLastGrownValue";
 
-local function CSF_ApplyCityStateGrowth()
-	local params = nil;
-	pcall(function() params = g_GameParameters and g_GameParameters.Parameters end);
-	if params == nil then return end;
-
-	local p = params["CityStateCount"];
+local function CSF_GrowOneParam(p)
 	if p == nil or p.Value == nil then return end;
-
-	-- 已经有标记就不再加（否则反复调用会把数量越滚越大）
-	if p[CSF_CITYSTATE_GROWTH_APPLIED] then return end;
 
 	local iN = tonumber(p.Value);
 	if iN == nil or iN <= 0 then return end
 
+	-- 已经放大过（当前值就是上次放大的结果）→ 跳过
+	if p[CSF_CITYSTATE_LAST_GROWN] ~= nil and iN == p[CSF_CITYSTATE_LAST_GROWN] then
+		return
+	end
+
 	local iActual = iN + math.floor(iN / 2);
 	p.Value = iActual;
-	p[CSF_CITYSTATE_GROWTH_APPLIED] = true;
+	p[CSF_CITYSTATE_LAST_GROWN] = iActual;
 
 	pcall(function()
 		print("[CSF] 城邦数量：滑条选 " .. tostring(iN) ..
 		      " -> 实际创建 " .. tostring(iActual) ..
 		      "（多出的 " .. tostring(iActual - iN) .. " 个由本模组收走供建立）");
 	end);
+end
+
+local function CSF_ApplyCityStateGrowth()
+	local params = nil;
+	pcall(function() params = g_GameParameters and g_GameParameters.Parameters end);
+	if params == nil then return end;
+
+	CSF_GrowOneParam(params["CityStateCount"]);
 end
 -- ============ 补丁结束 ============
 
@@ -697,6 +708,16 @@ function GameParameters_PostProcess(o, parameter)
 	--};
 --
 	--parameter.GroupId = triage[parameter.GroupId] or parameter.GroupId;
+
+	-- ★ CityStateFounder：参数构建阶段就把城邦数量放大到 N + floor(N/2)。
+	--   这条路【每次开局都跑】（SetupParameters.lua:1007 的 Query Parameters），
+	--   所以即使玩家直接开局、没动任何设置（配置走缓存、Config_EndWrite 不跑），
+	--   数量也一样会被放大。
+	--   另一条路 Config_EndWrite 也挂了同样的处理，覆盖"玩家拖过滑条"的情况；
+	--   两边共用 CSF_GrowOneParam 里的"上次放大值"幂等保护，不会重复放大。
+	if parameter ~= nil and parameter.ParameterId == "CityStateCount" then
+		pcall(function() CSF_GrowOneParam(parameter) end);
+	end
 end
 
 -- Generate the game setup parameters and populate the UI.
