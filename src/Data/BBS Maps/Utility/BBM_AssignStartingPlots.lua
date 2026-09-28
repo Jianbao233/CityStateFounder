@@ -389,58 +389,75 @@ function BBM_AssignStartingPlots.Create(args)
                     local iW, iH = BBM_HexMap.width, BBM_HexMap.height
                     local iCx, iCy = math.floor(iW / 2), math.floor(iH / 2)
                     local iMaxR = math.max(iW, iH)
-                    for r = 0, iMaxR do
+
+                    -- ⭐ 间距【递减重试】：先用 12 格找（贴近 CCB 的最小间距，
+                    --    城邦之间不会挤在一起，观感自然）；找不到就退到 8 → 5 → 3 → 1。
+                    --
+                    -- ⚠️ 为什么必须递减：12 格间距会占掉 25x25 = 625 格，
+                    --    而地图没有那么大 ——
+                    --      决斗 1144 格 ≈ 只能容 1 个、极小 ≈3、小 ≈5、
+                    --      标准 4536 格 ≈ 7 个（而这局要 9 个，已在临界点！）
+                    --    → 一旦"整张图找不到空格"，下面的 else 分支就会
+                    --      【不给出生点】→ 引擎做玩家初始化时把没出生点的城邦
+                    --      直接删掉（DLL: "Players without start positions will
+                    --      be removed."）→ 玩家数一变，开局直接失败退回主菜单。
+                    --      （这个坑我们踩过，代价是一整局进不去。）
+                    --    递减重试保证：只要图上还有【任何】一块空地，就一定能拿到
+                    --    出生点 —— 最坏情况退回"只占单格"的老行为（城邦会挤，
+                    --    但游戏一定能开）。
+                    --
+                    -- ✅ 安全性：失败的那一轮【不会标记任何格子】（标记只在找到时
+                    --    执行），所以下一轮看到的地图状态完全相同，重试是干净的。
+                    for _, iSpread in ipairs({12, 8, 5, 3, 1}) do
                         if bFound then break end
-                        for dx = -r, r do
-                            for dy = -r, r do
-                                if (math.abs(dx) == r or math.abs(dy) == r) then
-                                    local x, y = iCx + dx, iCy + dy
-                                    if x >= 1 and x <= iW - 2 and y >= 1 and y <= iH - 2 then
-                                        local h = BBM_HexMap:GetHexInMap(x, y)
-                                        if h ~= nil and h.IsCivStartingPlot == false
-                                           and h:IsImpassable() == false then
-                                            local p = h.Plot
-                                            local bWater = true
-                                            pcall(function() bWater = p:IsWater() end)
-                                            if not bWater then
-                                                local iLand = 0
-                                                for d = 0, 5 do
-                                                    local nb = Map.GetAdjacentPlot(x, y, d)
-                                                    if nb ~= nil and nb:IsWater() == false
-                                                       and nb:IsImpassable() == false then
-                                                        iLand = iLand + 1
+
+                        for r = 0, iMaxR do
+                            if bFound then break end
+                            for dx = -r, r do
+                                for dy = -r, r do
+                                    if (math.abs(dx) == r or math.abs(dy) == r) then
+                                        local x, y = iCx + dx, iCy + dy
+                                        if x >= 1 and x <= iW - 2 and y >= 1 and y <= iH - 2 then
+                                            local h = BBM_HexMap:GetHexInMap(x, y)
+                                            if h ~= nil and h.IsCivStartingPlot == false
+                                               and h:IsImpassable() == false then
+                                                local p = h.Plot
+                                                local bWater = true
+                                                pcall(function() bWater = p:IsWater() end)
+                                                if not bWater then
+                                                    local iLand = 0
+                                                    for d = 0, 5 do
+                                                        local nb = Map.GetAdjacentPlot(x, y, d)
+                                                        if nb ~= nil and nb:IsWater() == false
+                                                           and nb:IsImpassable() == false then
+                                                            iLand = iLand + 1
+                                                        end
                                                     end
-                                                end
-                                                if iLand >= 4 then
-                                                    fallbackPlot = p
-                                                    h.IsCivStartingPlot = true   -- ★ 占住，避免下一个重复
-                                                    -- ⚠️⚠️ 只标记【单格】是不够的 —— 实测踩到：
-                                                    --    这样选出来的兜底格子会【一个挨一个】
-                                                    --    （日志实证：(41,29) (42,29) (43,29) 只隔 1 格），
-                                                    --    地图中心挤成一团。
-                                                    -- 必须像下面"额外城邦"那段一样，把周围 12 格
-                                                    -- 也标记为已占用（贴近 CCB 自己的最小间距
-                                                    -- BBM_ACTUALMINDIST ≈ 12~13）。
-                                                    for ddx = -12, 12 do
-                                                        for ddy = -12, 12 do
-                                                            local nx, ny = x + ddx, y + ddy
-                                                            if nx >= 0 and nx < iW and ny >= 0 and ny < iH then
-                                                                local nh = BBM_HexMap:GetHexInMap(nx, ny)
-                                                                if nh ~= nil then
-                                                                    nh.IsCivStartingPlot = true
+                                                    if iLand >= 4 then
+                                                        fallbackPlot = p
+                                                        h.IsCivStartingPlot = true
+                                                        -- 把周围 iSpread 格也标记为已占用
+                                                        for ddx = -iSpread, iSpread do
+                                                            for ddy = -iSpread, iSpread do
+                                                                local nx, ny = x + ddx, y + ddy
+                                                                if nx >= 0 and nx < iW and ny >= 0 and ny < iH then
+                                                                    local nh = BBM_HexMap:GetHexInMap(nx, ny)
+                                                                    if nh ~= nil then
+                                                                        nh.IsCivStartingPlot = true
+                                                                    end
                                                                 end
                                                             end
                                                         end
+                                                        bFound = true
+                                                        break
                                                     end
-                                                    bFound = true
-                                                    break
                                                 end
                                             end
                                         end
                                     end
                                 end
+                                if bFound then break end
                             end
-                            if bFound then break end
                         end
                     end
                 end)
