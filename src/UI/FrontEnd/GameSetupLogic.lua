@@ -4,6 +4,60 @@
 include( "InstanceManager" );
 include ("SetupParameters");
 
+-- ===========================================================================
+-- ============ CityStateFounder 补丁 A：数量写入拦截（核心）============
+-- ===========================================================================
+-- 目的：滑条上显示 / 玩家选的 N = 本局【地图上出现】的城邦数；
+--       真正写进游戏配置库的是 N + floor(N/2) —— 多出来的那部分
+--       由本模组收走藏起来，供玩家的建邦使者建立。
+--
+-- ★ 为什么挂在 SetupParameters:SetParameterValue（实测踩了很多轮才定下来）：
+--   这是【唯一】真正把参数值写进配置库的地方（SetupParameters.lua:488-493）：
+--       function SetupParameters:SetParameterValue(p, v)
+--           p.Value = v;
+--           self:Config_BeginWrite();
+--           self:Config_WriteParameterValues(p);   ← 值在这里落库
+--           self:Config_EndWrite(result);
+--       end
+--
+--   之前试过的两个钩子都【改不动落库的值】：
+--     · Parameters_Config_EndWrite —— 参数值早在拖滑条时就落库了，
+--       此时改内存里的 p.Value 不会回写配置库（实测：日志打了"18 -> 27"，
+--       引擎仍只创建 18 个）。
+--     · GameParameters_PostProcess —— 同上，而且它只在构建参数时跑一次。
+--
+--   这里改成【写两次】：先用原值写（p.Value 保持 N，滑条与数字框显示正常），
+--   再用放大值直接落库（引擎读到的就是 N + floor(N/2)）。
+--
+-- 幂等：本函数是"每次设值"的入口，天然每次都会走一遍，不需要额外标记。
+local CSF_OrigSetParameterValue = SetupParameters.SetParameterValue;
+
+function SetupParameters:SetParameterValue(p, v)
+	-- ① 原样写：保证 p.Value = v，UI（滑条 / 数字框）显示玩家选的值
+	local result = CSF_OrigSetParameterValue(self, p, v);
+
+	-- ② 城邦数量：再把放大值写进配置库（UI 不动）
+	if p ~= nil and p.ParameterId == "CityStateCount" then
+		local iN = tonumber(v);
+		if iN ~= nil and iN > 0 then
+			local iActual = iN + math.floor(iN / 2);
+			local bOK = pcall(function()
+				self:Config_Write(p.ConfigurationGroup, p.ConfigurationId, iActual);
+			end);
+			if bOK then
+				pcall(function()
+					print("[CSF] 城邦数量：滑条选 " .. tostring(iN) ..
+					      " -> 配置库写入 " .. tostring(iActual) ..
+					      "（多出的 " .. tostring(iActual - iN) .. " 个由本模组收走供建立）");
+				end);
+			end
+		end
+	end
+
+	return result;
+end
+-- ============ 补丁 A 结束 ============
+
 -- Instance managers for dynamic game options (parent is set dynamically).
 g_BooleanParameterManager	= InstanceManager:new("BooleanParameterInstance",	"CheckBox");
 g_PullDownParameterManager	= InstanceManager:new("PullDownParameterInstance",	"Root");
@@ -113,8 +167,6 @@ end
 -- ============ 补丁结束 ============
 
 function Parameters_Config_EndWrite(o, config_changed)
-	-- ★ CityStateFounder：写配置之前把城邦数量放大到 N + floor(N/2)
-	pcall(CSF_ApplyCityStateGrowth);
 	SetupParameters.Config_EndWrite(o, config_changed);
 	
 	-- Dispatch a Lua event notifying that the configuration has changed.
@@ -709,15 +761,6 @@ function GameParameters_PostProcess(o, parameter)
 --
 	--parameter.GroupId = triage[parameter.GroupId] or parameter.GroupId;
 
-	-- ★ CityStateFounder：参数构建阶段就把城邦数量放大到 N + floor(N/2)。
-	--   这条路【每次开局都跑】（SetupParameters.lua:1007 的 Query Parameters），
-	--   所以即使玩家直接开局、没动任何设置（配置走缓存、Config_EndWrite 不跑），
-	--   数量也一样会被放大。
-	--   另一条路 Config_EndWrite 也挂了同样的处理，覆盖"玩家拖过滑条"的情况；
-	--   两边共用 CSF_GrowOneParam 里的"上次放大值"幂等保护，不会重复放大。
-	if parameter ~= nil and parameter.ParameterId == "CityStateCount" then
-		pcall(function() CSF_GrowOneParam(parameter) end);
-	end
 end
 
 -- Generate the game setup parameters and populate the UI.
