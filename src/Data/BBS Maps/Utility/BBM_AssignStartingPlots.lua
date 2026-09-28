@@ -414,6 +414,24 @@ function BBM_AssignStartingPlots.Create(args)
                                                 if iLand >= 4 then
                                                     fallbackPlot = p
                                                     h.IsCivStartingPlot = true   -- ★ 占住，避免下一个重复
+                                                    -- ⚠️⚠️ 只标记【单格】是不够的 —— 实测踩到：
+                                                    --    这样选出来的兜底格子会【一个挨一个】
+                                                    --    （日志实证：(41,29) (42,29) (43,29) 只隔 1 格），
+                                                    --    地图中心挤成一团。
+                                                    -- 必须像下面"额外城邦"那段一样，把周围 12 格
+                                                    -- 也标记为已占用（贴近 CCB 自己的最小间距
+                                                    -- BBM_ACTUALMINDIST ≈ 12~13）。
+                                                    for ddx = -12, 12 do
+                                                        for ddy = -12, 12 do
+                                                            local nx, ny = x + ddx, y + ddy
+                                                            if nx >= 0 and nx < iW and ny >= 0 and ny < iH then
+                                                                local nh = BBM_HexMap:GetHexInMap(nx, ny)
+                                                                if nh ~= nil then
+                                                                    nh.IsCivStartingPlot = true
+                                                                end
+                                                            end
+                                                        end
+                                                    end
                                                     bFound = true
                                                     break
                                                 end

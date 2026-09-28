@@ -967,25 +967,29 @@ local function CSF_ReserveCityStates()
             tNormal[#tNormal + 1] = iPlayer;
         end
     end
-    for _, v in ipairs(tNormal) do tOrdered[#tOrdered + 1] = v end
+    -- ⭐ 排序：【带兜底标记的城邦排在最前】。
+    --    它们的出生点是"CCB 放不下时救急给的"，挤在地图中部、观感差，
+    --    而且本来就是为"休眠供玩家建立"而存在的 → 优先收走它们。
+    --    （曾经反过来"放到最后"，结果兜底城邦全留在地图上、地图中心挤成一团。）
     for _, v in ipairs(tExtra) do tOrdered[#tOrdered + 1] = v end
+    for _, v in ipairs(tNormal) do tOrdered[#tOrdered + 1] = v end
     if #tExtra > 0 then
         print("[CSF] reserve: 其中 " .. tostring(#tExtra) ..
-              " 个是本模组额外造的（放到最后、尽量不动它们）");
+              " 个是补丁兜底的（优先收走供建立）");
     end
 
     for _, iPlayer in ipairs(tOrdered) do
         if iDone >= iWantReserve then break end
 
-        -- ⛔ 硬保险：本模组额外造的城邦【永不】被藏起来。
-        --    实测：对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION）。
-        --    ⚠️ 这里【不能用 goto】—— Civ6 是 Lua 5.1，goto 是 5.2 才有的，
-        --       写 goto 会让整个脚本 Syntax Error、整份 CSF_Gameplay.lua 不加载
-        --       （实测踩到过，代价是休眠机制全废）。所以用嵌套 if。
-        local bIsExtra = CSF_Safe(function()
-            return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
-        end);
-        if bIsExtra == nil or bIsExtra == 0 then
+        -- ⚠️ 这里【不能用 goto】—— Civ6 是 Lua 5.1，goto 是 5.2 才有的，
+        --    写 goto 会让整个脚本 Syntax Error、整份 CSF_Gameplay.lua 不加载
+        --    （实测踩到过，代价是休眠机制全废）。所以保留这一层 do...end。
+        --
+        -- ⚠️ 历史：这里曾经"硬跳过所有带标记的城邦"（因为早期用 AddPlayer 造的
+        --    那些一藏就崩）。现在这些是【引擎自己创建】的基础城邦，只是出生点
+        --    由补丁兜底给 —— 引擎处理后完全正常，可以安全休眠。
+        --    所以跳过逻辑已移除，它们会优先被收走。
+        do
 
             -- 已经是预留的就跳过
             if not CSF_IsReserved(iPlayer) then
