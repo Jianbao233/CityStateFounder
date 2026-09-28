@@ -619,7 +619,7 @@ end
 --     在开局【高级设置】里用官方【城邦选择器】勾一个大候选池、把城邦数量拉满，
 --     再把 CSF_KEEP_ACTIVE_ON_MAP 设成官方 DefaultCityStates 的数值。
 --     （详见 Data/CSF_MapSizes.sql 的说明）
-local CSF_KEEP_ACTIVE_ON_MAP = -3;
+local CSF_KEEP_ACTIVE_ON_MAP = -2;
 
 -- 按比例保留时，留在地图上的百分比（1..100）
 --   50 = 一半留在地图上、一半可建（**默认**）
@@ -635,7 +635,7 @@ local CSF_KEEP_ACTIVE_ON_MAP = -3;
         --      0%   -> 地图 0 座 + 可建 18 座
         --    ⚠️ 本模组额外造的城邦（补丁兜底的、带 CSF_EXTRA_DORMANT 标记的）
         --       永远不藏 —— 对它们动手会让引擎原生崩溃。
-        local CSF_KEEP_ACTIVE_PERCENT = 35;
+        local CSF_KEEP_ACTIVE_PERCENT = 67;
 
 -- ---------------------------------------------------------------------------
 -- 【额外休眠城邦】—— 开局"凭空"多造几个城邦玩家，让玩家有更多可选（T-144）
