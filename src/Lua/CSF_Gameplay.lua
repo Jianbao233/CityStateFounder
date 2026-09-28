@@ -628,17 +628,14 @@ local CSF_KEEP_ACTIVE_ON_MAP = -2;
 --   0  = 全部可建（地图上没有城邦，⚠️ 世界会很空）
 --   100= 全部留在地图上（= 纯原版，没有可建的）
 -- ⭐⭐ 保留比例：越低，「可建」的城邦越多。
---
---    按"选 N 个落地 + N/2 个可建"的设计，总数 1.5N 时要保留 N → 约 67%。
---      27 个城邦时： 67% -> 地图 18 座 + 可建 9 座   ← 目标形态
---      18 个城邦时： 67% -> 地图 12 座 + 可建 6 座   （数量钩子没生效时的兜底）
---
---    想多留可建就往下调：50% -> 一半一半；20% -> 大量可建；0% -> 全部可建。
---
---    ⚠️ 曾经用过 -3 模式（只藏"补丁兜底的额外城邦"）。它有个致命弱点：
---       【依赖 CCB 放不下】—— 地图容量够大时一个都不兜底、一个都不打标记，
---       可建就是 0。已实测踩到（27 个城邦全放下、可建 0），所以改回按比例。
-        local CSF_KEEP_ACTIVE_PERCENT = 50;
+        --    18 个城邦时的对照：
+        --      50%  -> 地图 9 座 + 可建 9 座
+        --      35%  -> 地图 6 座 + 可建 12 座   ← 当前
+        --      20%  -> 地图 4 座 + 可建 14 座
+        --      0%   -> 地图 0 座 + 可建 18 座
+        --    ⚠️ 本模组额外造的城邦（补丁兜底的、带 CSF_EXTRA_DORMANT 标记的）
+        --       永远不藏 —— 对它们动手会让引擎原生崩溃。
+        local CSF_KEEP_ACTIVE_PERCENT = 67;
 
 -- ---------------------------------------------------------------------------
 -- 【额外休眠城邦】—— 开局"凭空"多造几个城邦玩家，让玩家有更多可选（T-144）
@@ -980,28 +977,15 @@ local function CSF_ReserveCityStates()
     for _, iPlayer in ipairs(tOrdered) do
         if iDone >= iWantReserve then break end
 
-        -- ⛔ 硬保险：本模组额外造的城邦默认【不藏】。
-        --    历史原因：早期额外城邦是用 WorldBuilder 的 AddPlayer 造的，
-        --    对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION）。
-        --    现在额外城邦是【引擎自己激活】出来的，理论上可以安全隐藏 ——
-        --    所以 -3 模式（就是要藏它们）下这个保险不生效。
-        --
-        --    ⚠️ 实测教训：-3 模式和这个保险曾经互相打架 ——
-        --       -3 算出"要藏 N 个额外城邦"，保险又把它们全跳过，
-        --       结果一个都没藏，地图中间全是它们派出来的开拓者。
-        --
+        -- ⛔ 硬保险：本模组额外造的城邦【永不】被藏起来。
+        --    实测：对它们动手会让引擎原生崩溃（EXCEPTION_ACCESS_VIOLATION）。
         --    ⚠️ 这里【不能用 goto】—— Civ6 是 Lua 5.1，goto 是 5.2 才有的，
-        --       写 goto 会让整个脚本 Syntax Error、整份 CSF_Gameplay.lua 不加载。
-        local bSkipExtra = false;
-        if CSF_KEEP_ACTIVE_ON_MAP ~= -3 then
-            local bIsExtra = CSF_Safe(function()
-                return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
-            end);
-            if bIsExtra ~= nil and bIsExtra ~= 0 then
-                bSkipExtra = true;
-            end
-        end
-        if not bSkipExtra then
+        --       写 goto 会让整个脚本 Syntax Error、整份 CSF_Gameplay.lua 不加载
+        --       （实测踩到过，代价是休眠机制全废）。所以用嵌套 if。
+        local bIsExtra = CSF_Safe(function()
+            return Players[iPlayer]:GetProperty("CSF_EXTRA_DORMANT");
+        end);
+        if bIsExtra == nil or bIsExtra == 0 then
 
             -- 已经是预留的就跳过
             if not CSF_IsReserved(iPlayer) then

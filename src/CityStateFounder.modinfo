@@ -64,8 +64,7 @@
     <!-- ⭐ 把滑条【显示】的上限映射回官方 X（标准图 18）。
          只影响 Queries 表里 CityStateCountRange 这条查询 —— 也就是 UI；
          引擎实际允许的上限仍是 CSF_MapSizes.xml 抬高的 X + X/2（标准图 27）。
-         配合 GameSetupLogic.lua 里的数量钩子：
-           滑条显示 18 → 玩家选 18 → 钩子写 27 → 引擎创建 27 → 18 落地 + 9 可建。 -->
+         两者配合：滑条最高显示 18，但引擎能创建到 27。 -->
     <UpdateDatabase id="CSF_CityStateCountRange">
       <Properties>
         <LoadOrder>999999</LoadOrder>
