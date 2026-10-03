@@ -121,6 +121,14 @@
       <File>Lua/CSF_Gameplay.lua</File>
     </AddGameplayScripts>
 
+    <!-- ⭐ 实时创建城邦（2026-10-04 实测突破）
+         三步公式：SetPlayerSlotStatus(slot,1) → InitializePlayer(slot) → GetCities():Create(x,y)
+         让玩家把【池子里有、但未出现在玩家槽位】的城邦在对局中实时建到任意位置。
+         原理与逆向依据见 docs/DLL实时激活城邦_逆向进展.md，以及该文件头部注释。 -->
+    <AddGameplayScripts id="CSF_CreateCityState">
+      <File>Lua/CSF_CreateCityState.lua</File>
+    </AddGameplayScripts>
+
     <ImportFiles id="CSF_UI_IMPORT">
       <Properties>
         <LoadOrder>1000</LoadOrder>
