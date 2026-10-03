@@ -206,9 +206,15 @@ for lua_p in sorted(SRC.rglob("*.lua")):
         m = re.match(r"\s*local\s+function\s+([A-Za-z_0-9]+)", ln)
         if m:
             defs.setdefault(m.group(1), i)
-        m2 = re.match(r"\s*local\s+([A-Za-z_0-9]+)\s*=", ln)
+            continue
+        # local a = ...  /  local a, b, c = ...   ← 必须支持多变量，
+        # 否则 `local sCiv, bAlive = nil, nil;` 会被漏掉，导致同名 local 被误报。
+        m2 = re.match(r"\s*local\s+([A-Za-z_0-9,\s]+?)\s*=", ln)
         if m2:
-            defs.setdefault(m2.group(1), i)
+            for nm in m2.group(1).split(","):
+                nm = nm.strip()
+                if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", nm or ""):
+                    defs.setdefault(nm, i)
 
     bad = 0
     for name, dline in defs.items():
