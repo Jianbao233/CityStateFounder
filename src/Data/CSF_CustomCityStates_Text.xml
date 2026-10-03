@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GameData>
+  <!-- 「能力重复、名字不同」的自定义城邦文案 —— 由 tools/_gen_custom_cs.py 生成 -->
+  <LocalizedText>
+    <Replace Tag="LOC_CSF_CS_01_NAME" Language="en_US"><Text>Neo Alexandria</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_NAME" Language="zh_Hans_CN"><Text>新亚历山大</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_DESC" Language="en_US"><Text>A city-state of Neo Alexandria.</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_DESC" Language="zh_Hans_CN"><Text>新亚历山大城邦。</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_ADJ" Language="en_US"><Text>Neo Alexandria</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_ADJ" Language="zh_Hans_CN"><Text>新亚历山大</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_LEADER_NAME" Language="en_US"><Text>Neo Alexandria Council</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_LEADER_NAME" Language="zh_Hans_CN"><Text>新亚历山大议会</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_CAPITAL" Language="en_US"><Text>Neo Alexandria</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_01_CAPITAL" Language="zh_Hans_CN"><Text>新亚历山大</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_NAME" Language="en_US"><Text>Neo Memphis</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_NAME" Language="zh_Hans_CN"><Text>新孟菲斯</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_DESC" Language="en_US"><Text>A city-state of Neo Memphis.</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_DESC" Language="zh_Hans_CN"><Text>新孟菲斯城邦。</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_ADJ" Language="en_US"><Text>Neo Memphis</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_ADJ" Language="zh_Hans_CN"><Text>新孟菲斯</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_LEADER_NAME" Language="en_US"><Text>Neo Memphis Council</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_LEADER_NAME" Language="zh_Hans_CN"><Text>新孟菲斯议会</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_CAPITAL" Language="en_US"><Text>Neo Memphis</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_02_CAPITAL" Language="zh_Hans_CN"><Text>新孟菲斯</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_NAME" Language="en_US"><Text>Neo Uruk</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_NAME" Language="zh_Hans_CN"><Text>新乌鲁克</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_DESC" Language="en_US"><Text>A city-state of Neo Uruk.</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_DESC" Language="zh_Hans_CN"><Text>新乌鲁克城邦。</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_ADJ" Language="en_US"><Text>Neo Uruk</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_ADJ" Language="zh_Hans_CN"><Text>新乌鲁克</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_LEADER_NAME" Language="en_US"><Text>Neo Uruk Council</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_LEADER_NAME" Language="zh_Hans_CN"><Text>新乌鲁克议会</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_CAPITAL" Language="en_US"><Text>Neo Uruk</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_03_CAPITAL" Language="zh_Hans_CN"><Text>新乌鲁克</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_NAME" Language="en_US"><Text>Neo Nineveh</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_NAME" Language="zh_Hans_CN"><Text>新尼尼微</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_DESC" Language="en_US"><Text>A city-state of Neo Nineveh.</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_DESC" Language="zh_Hans_CN"><Text>新尼尼微城邦。</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_ADJ" Language="en_US"><Text>Neo Nineveh</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_ADJ" Language="zh_Hans_CN"><Text>新尼尼微</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_LEADER_NAME" Language="en_US"><Text>Neo Nineveh Council</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_LEADER_NAME" Language="zh_Hans_CN"><Text>新尼尼微议会</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_CAPITAL" Language="en_US"><Text>Neo Nineveh</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_04_CAPITAL" Language="zh_Hans_CN"><Text>新尼尼微</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_NAME" Language="en_US"><Text>Neo Carthage</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_NAME" Language="zh_Hans_CN"><Text>新迦太基</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_DESC" Language="en_US"><Text>A city-state of Neo Carthage.</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_DESC" Language="zh_Hans_CN"><Text>新迦太基城邦。</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_ADJ" Language="en_US"><Text>Neo Carthage</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_ADJ" Language="zh_Hans_CN"><Text>新迦太基</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_LEADER_NAME" Language="en_US"><Text>Neo Carthage Council</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_LEADER_NAME" Language="zh_Hans_CN"><Text>新迦太基议会</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_CAPITAL" Language="en_US"><Text>Neo Carthage</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_05_CAPITAL" Language="zh_Hans_CN"><Text>新迦太基</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_NAME" Language="en_US"><Text>Neo Tyre</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_NAME" Language="zh_Hans_CN"><Text>新推罗</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_DESC" Language="en_US"><Text>A city-state of Neo Tyre.</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_DESC" Language="zh_Hans_CN"><Text>新推罗城邦。</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_ADJ" Language="en_US"><Text>Neo Tyre</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_ADJ" Language="zh_Hans_CN"><Text>新推罗</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_LEADER_NAME" Language="en_US"><Text>Neo Tyre Council</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_LEADER_NAME" Language="zh_Hans_CN"><Text>新推罗议会</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_CAPITAL" Language="en_US"><Text>Neo Tyre</Text></Replace>
+    <Replace Tag="LOC_CSF_CS_06_CAPITAL" Language="zh_Hans_CN"><Text>新推罗</Text></Replace>
+  </LocalizedText>
+</GameData>

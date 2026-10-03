@@ -88,6 +88,25 @@
       <File>Data/CSF_Units.sql</File>
     </UpdateDatabase>
 
+    <!-- ⭐⭐ 「能力重复、名字不同」的自定义城邦
+         原理：城邦能力由 LeaderTraits 承载 —— 各城邦名字/领袖不同，
+               但指向【同一个 Trait】→ 能力完全相同、名字各自独立。
+         数据模型依据：实机数据库反查（docs/DLL版_调研设计与计划.md 附录 E）。
+         SQL 由 tools/_gen_custom_cs.py 生成，加城邦改那个脚本即可。
+         LoadOrder 取高值，确保晚于其它 mod 的城邦改动。 -->
+    <UpdateDatabase id="CSF_CustomCityStates" criteria="CSF_XP2">
+      <Properties>
+        <LoadOrder>2100000</LoadOrder>
+      </Properties>
+      <File>Data/CSF_CustomCityStates.sql</File>
+    </UpdateDatabase>
+    <UpdateText id="CSF_CustomCityStates_Text" criteria="CSF_XP2">
+      <Properties>
+        <LoadOrder>2100000</LoadOrder>
+      </Properties>
+      <File>Data/CSF_CustomCityStates_Text.xml</File>
+    </UpdateText>
+
     <UpdateText id="CSF_Text_IG" criteria="CSF_XP2">
       <File>Text/CSF_Text.xml</File>
     </UpdateText>
@@ -178,6 +197,8 @@
     <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
     <File>Data/BBS Maps/Utility/BBM_CivilizationAssign.lua</File>
     <File>Data/CSF_Units.sql</File>
+    <File>Data/CSF_CustomCityStates.sql</File>
+    <File>Data/CSF_CustomCityStates_Text.xml</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
     <File>UI/CSF_Panel.lua</File>
