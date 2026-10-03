@@ -69,6 +69,20 @@ local CSF_ALLOW_OWN_TERRITORY = false;
 local CSF_ALLOW_RETARGET = false;
 
 -- ───────────────────────────────────────────────────────────────────────────
+-- 【建副本】开关 —— 默认【开启】
+--   目标文明本局【已被占用】时，再建一个"能力相同、名字不同"的城邦（名字加 " II"）。
+--   手法来自 CCB MirrorMap；关键差别是我们必须【显式重新初始化】玩家，
+--   否则引擎不会按新文明重建颜色/名字（这就是当年 CSF_ALLOW_RETARGET 出半成品的原因）。
+--   详见下方 CSF_FoundCityStateCopy 的头注释。
+-- ───────────────────────────────────────────────────────────────────────────
+local CSF_ENABLE_COPY = true;
+
+-- 引擎内部的槽位状态枚举（**不是** Lua 的 SS_*）
+--   逆向依据：FUN_180617370 只在状态 ∈ {0,1,3} 时才真正初始化玩家；
+--   预注册城邦槽的状态是 5，会被静默拒绝。详见 docs/DLL实时激活城邦_逆向进展.md §9
+local CSF_SLOT_AI = 1;
+
+-- ───────────────────────────────────────────────────────────────────────────
 -- 【动态创建（AddPlayer）】开关 —— 默认【关闭】
 --   ⚠️ 同上：必须在所有使用点之前定义，否则静默失效（已踩两次，audit 兜底）。
 --
@@ -1295,6 +1309,184 @@ end
 --        → 相当于把"8 个固定城邦"变成"48 选 8"，且只用已验证的 API。
 --     ③【新建】AddPlayer 动态创建 —— 兜底；仅当上面两条都用尽时才走，
 --        且受 CSF_ENABLE_DYNAMIC_CREATION 开关控制。
+-- ===========================================================================
+-- ★ 建【副本】：目标文明本局已被占用时，再建一个"能力相同、名字不同"的城邦
+-- ===========================================================================
+-- 需求来源（用户）：城邦池里每一个城邦都应该能在场上建出来，包括【本局已上场】的
+--   —— 已上场的就再建一个副本，能力相同、名字加后缀（" II" / " III"）。
+--
+-- 手法来源：CCB MirrorMap 的 MirrorSyncCityStateTemplates
+--   （ChineseCiv6BalanceMirrorMapDemo\Data\BBS Maps\Utility\MirrorMapDemo_SpawnPatches.lua:437）
+--   它把源城邦的 CivilizationType / LeaderType 直接拷到另一个槽上，
+--   于是两个槽共用同一个文明 —— 即"两个能力一样的城邦"。
+--   名字差异由 UI 层拼后缀（UI\MirrorMapDemo_CityStatesPatch.lua:26
+--   MirrorMapDemo_AppendDirectionalSuffix），Gameplay 侧只存标记。
+--
+-- ⚠️ 与 MirrorMap 的关键差别：它在【地图生成阶段】改（引擎初始化玩家之前），
+--    所以颜色/名字/特性都对。我们在【对局中】改，引擎【不会】重跑初始化 ——
+--    这正是当年 CSF_ALLOW_RETARGET 分支造出"半成品"（颜色不对、名字是旧名）的原因。
+--
+-- ⭐ 解法：改完文明后【显式重新初始化】：
+--      UninitializePlayer  →  SetPlayerLeader(新文明)  →
+--      SetPlayerSlotStatus(1)  →  InitializePlayer
+--    （后两步的依据：引擎 FUN_180617370 只在槽位状态 ∈ {0,1,3} 时才真正初始化；
+--      预注册城邦槽的状态是 5，会被静默拒绝。逆向详见
+--      docs/DLL实时激活城邦_逆向进展.md §9）
+--
+-- ⚠️ 建城【不用】Cities:Create —— 见 T-123：Create 在间距/地形不满足时静默失败
+--    并永久损坏该城邦。改为放 UNIT_SETTLER 让引擎自建。
+-- ===========================================================================
+local function CSF_NextCopySuffix(iSlot)
+    -- 数一下这个文明已经建了几个副本 → " II" / " III" / …
+    local iN = 0;
+    CSF_Safe(function()
+        for i = 0, 63 do
+            local sCopyMark = Game:GetProperty("CSF_CopyOf_" .. tostring(i));
+            if sCopyMark ~= nil then iN = iN + 1 end
+        end
+    end);
+    local tRoman = { "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X" };
+    local sSuffixNew = tRoman[iN] or ("x" .. tostring(iN + 2));
+    return " " .. sSuffixNew;
+end
+
+local function CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID)
+    -- 目标文明本局已被占用 → 找一个新的槽，设成【同一个文明】，再建一个
+    local pm = WorldBuilder and WorldBuilder.PlayerManager and WorldBuilder.PlayerManager() or nil;
+    if pm == nil then return false, "no_worldbuilder" end;
+
+    local sLeader = CSF_GetLeaderForCiv(sCiv);
+    if sLeader == nil then
+        print("[CSF] copy: 找不到 " .. tostring(sCiv) .. " 的领袖 -> 放弃");
+        return false, "no_leader";
+    end
+
+    -- ① 先验证地点（T-118：验证在创建玩家之前，避免留下孤儿）
+    local bPre, sPre = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+    if not bPre then
+        print("[CSF] copy: 地点不合法（" .. tostring(sPre) .. "）");
+        return false, sPre;
+    end
+
+    -- ② 找一个【同类别】的休眠槽并释放它
+    --    同类别才能拿到正确的 front 颜色（6 个类别对应 6 个 front 值，实测）
+    local sTargetCat = nil;
+    CSF_Safe(function()
+        local tRows = DB.ConfigurationQuery(
+            "SELECT CivilizationType, CityStateCategory FROM CityStates");
+        if type(tRows) == "table" then
+            for _, r in ipairs(tRows) do
+                if r.CivilizationType == sCiv then sTargetCat = r.CityStateCategory end
+            end
+        end
+    end);
+
+    local tDormant = {};
+    local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
+    for _, iPlayer in ipairs(tIDs) do
+        local pPlayer = Players[iPlayer];
+        if pPlayer ~= nil then
+            local iCities = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
+            if iCities == 0 then
+                local bOnMap = false;
+                CSF_Safe(function()
+                    for _, pUnit in pPlayer:GetUnits():Members() do
+                        local x, y = pUnit:GetX(), pUnit:GetY();
+                        if x ~= nil and y ~= nil and x >= 0 and y >= 0 then bOnMap = true break end
+                    end
+                end);
+                if not bOnMap then
+                    local sThis = CSF_Safe(function()
+                        return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
+                    end);
+                    local sCat = nil;
+                    CSF_Safe(function()
+                        local tRows = DB.ConfigurationQuery(
+                            "SELECT CityStateCategory FROM CityStates WHERE CivilizationType='" ..
+                            tostring(sThis) .. "'");
+                        if type(tRows) == "table" and tRows[1] ~= nil then
+                            sCat = tRows[1].CityStateCategory;
+                        end
+                    end);
+                    tDormant[#tDormant + 1] = { ID = iPlayer, Civ = sThis, Cat = sCat };
+                end
+            end
+        end
+    end
+
+    local iVictim = nil;
+    for _, k in ipairs(tDormant) do
+        if iVictim == nil and sTargetCat ~= nil and k.Cat == sTargetCat then iVictim = k.ID end
+    end
+    if iVictim == nil then
+        for _, k in ipairs(tDormant) do if iVictim == nil then iVictim = k.ID end end
+    end
+    if iVictim == nil then
+        print("[CSF] copy: 没有可复用的休眠槽（池子已用尽）");
+        return false, "no_free_slot";
+    end
+    print("[CSF] copy: 复用休眠槽 " .. tostring(iVictim) .. " 作副本，目标类别=" ..
+          tostring(sTargetCat));
+
+    -- ③ ★ 核心：释放 → 改文明 → 重新初始化（顺序不可换）
+    pcall(function() pm:UninitializePlayer(iVictim) end);
+    local bSet = pcall(function()
+        pm:SetPlayerLeader(iVictim, sLeader, sCiv, "CIVILIZATION_LEVEL_CITY_STATE");
+    end);
+    if not bSet then
+        print("[CSF] copy: SetPlayerLeader 失败");
+        return false, "set_leader_failed";
+    end
+    -- ⭐ 重新初始化：让引擎按【新文明】重建颜色/名字/特性
+    --    引擎的门要求槽位状态 ∈ {0,1,3}（预注册城邦槽是 5，会被静默拒绝）
+    pcall(function() pm:SetPlayerSlotStatus(iVictim, CSF_SLOT_AI) end);
+    local bInit = pcall(function() pm:InitializePlayer(iVictim) end);
+    print("[CSF] copy: 重新初始化 ok=" .. tostring(bInit));
+
+    -- ④ 补起始位置（DLL 提示："Players without start positions will be removed."）
+    pcall(function() pm:SetRandomMinorStartingPosition(iVictim) end);
+
+    -- ⑤ 复查：文明 / 领袖 / 等级 三项都要对
+    local sGotCiv = CSF_Safe(function()
+        return PlayerConfigurations[iVictim]:GetCivilizationTypeName() end);
+    local sGotLdr = CSF_Safe(function()
+        return PlayerConfigurations[iVictim]:GetLeaderTypeName() end);
+    local sGotLvl = CSF_Safe(function()
+        return PlayerConfigurations[iVictim]:GetCivilizationLevelTypeName() end);
+    print("[CSF] copy 复查: civ=" .. tostring(sGotCiv) .. " leader=" .. tostring(sGotLdr) ..
+          " level=" .. tostring(sGotLvl));
+    if sGotCiv ~= sCiv then
+        print("[CSF] copy: 文明没设上（得到 " .. tostring(sGotCiv) .. "）→ 放弃");
+        return false, "civ_mismatch";
+    end
+
+    -- ⑥ 存副本标记（UI 层据此拼名字后缀）
+    local sSuffix = CSF_NextCopySuffix(iVictim);
+    pcall(function() Game:SetProperty("CSF_CopyOf_" .. tostring(iVictim), sCiv) end);
+    pcall(function() Game:SetProperty("CSF_CopySuffix_" .. tostring(iVictim), sSuffix) end);
+    print("[CSF] copy: 标记 " .. tostring(iVictim) .. " 为 " .. tostring(sCiv) ..
+          " 的副本，后缀=" .. tostring(sSuffix));
+
+    -- ⑦ 建城（T-123：放移民让引擎自建，不用 Cities:Create）
+    if m_tReserved[iVictim] then
+        m_tReserved[iVictim] = nil;
+        print("[CSF] copy: 解除 " .. tostring(iVictim) .. " 的预留标记");
+    end
+    local bUnit = pcall(function()
+        UnitManager.InitUnit(iVictim, "UNIT_SETTLER", iX, iY);
+    end);
+    print("[CSF] copy: 放移民到 (" .. tostring(iX) .. "," .. tostring(iY) ..
+          ") ok=" .. tostring(bUnit));
+    if not bUnit then
+        m_tReserved[iVictim] = true;
+        return false, "settler_failed", iVictim, true;
+    end
+    CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+    print("[CSF] copy: 副本 " .. tostring(iVictim) .. "（" .. tostring(sCiv) ..
+          tostring(sSuffix) .. "）的移民已就位，将在它的回合自行建城");
+    return true, "ok", iVictim, true;
+end
+
 local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
     if sCiv == nil or iX == nil or iY == nil then
         return false, "bad_args";
@@ -1431,6 +1623,19 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
         print("[CSF] settle: 城邦 " .. tostring(iReuse) ..
               " 的移民已就位，将在它的回合自行建城");
         return true, "ok", iReuse, true;        -- bFullMechanics = true
+    end
+
+    -- ★★ 建【副本】：走到这里说明本局没有【同文明】的休眠玩家
+    --     —— 要么该文明已上场（有城），要么它的槽被别处占着。
+    --     用户的最终需求：池子里任意城邦都要能建，包括已上场的（建副本）。
+    if CSF_ENABLE_COPY then
+        print("[CSF] 本局没有 " .. tostring(sCiv) .. " 的休眠玩家 → 尝试建副本");
+        local bCopy, sCopyReason, iCopy, bCopyFull =
+            CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID);
+        if bCopy == true then
+            return true, sCopyReason, iCopy, bCopyFull;
+        end
+        print("[CSF] 建副本失败（" .. tostring(sCopyReason) .. "），继续走后续兜底");
     end
 
     -- ★ 兜底：动态创建（AddPlayer）——默认【关闭】，见上方开关说明
