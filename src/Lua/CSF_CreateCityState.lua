@@ -98,6 +98,47 @@ function CSF_FindInactiveCityStateSlot(sCivFilter)
     return -1, nil, nil;
 end
 
+--- ⭐ 给某个槽补上颜色（需要 C6FW DLL 提供 C6FW.SetPlayerColor）。
+-- 逆向依据：颜色与槽位状态是同一属性表的两个属性（getter vtable +0x58 / setter +0x130），
+-- 但只有槽位状态有 Lua 包装 —— 颜色 setter 必须走 DLL。
+-- @return true / false（DLL 不可用时返回 false 并打警告）
+function CSF_ApplyCityStateColor(iSlot)
+    -- 取该槽的颜色值：优先按【文明】取（城邦颜色是按文明定义的）
+    local sCiv = nil;
+    pcall(function() sCiv = PlayerConfigurations[iSlot]:GetCivilizationTypeName() end);
+
+    local iColor = nil;
+    -- ① PlayerConfigurations:GetColor()（若引擎已给过值）
+    pcall(function() iColor = PlayerConfigurations[iSlot]:GetColor() end);
+    -- ② 按文明取（城邦走这条）
+    if (iColor == nil or iColor == 0) and sCiv ~= nil and UI ~= nil
+       and UI.GetPlayerColorValues ~= nil then
+        local ok, iBack = pcall(function() return UI.GetPlayerColorValues(sCiv, 0) end);
+        if ok and iBack ~= nil and iBack ~= 0 then iColor = iBack end;
+    end
+    if iColor == nil or iColor == 0 then
+        print("[CSF] 补色：取不到颜色值（" .. tostring(sCiv) .. "）");
+        return false;
+    end
+
+    -- ③ 交给 DLL 写（Lua 层没有颜色的 setter）
+    if C6FW == nil or C6FW.SetPlayerColor == nil then
+        print("[CSF] ⚠️ 补色：C6FW.SetPlayerColor 不可用（未安装 C6FW DLL）—— "
+              .. "该城邦将没有旗标颜色，交互时可能崩溃");
+        return false;
+    end
+    local ok2, r = pcall(function()
+        return C6FW.SetPlayerColor(PlayerConfigurations[iSlot], iColor);
+    end);
+    if ok2 and r ~= nil then
+        print("[CSF] ✅ 补色成功 slot=" .. tostring(iSlot)
+              .. " color=" .. tostring(iColor) .. "（" .. tostring(sCiv) .. "）");
+        return true;
+    end
+    print("[CSF] ❌ 补色失败 slot=" .. tostring(iSlot) .. " err=" .. tostring(r));
+    return false;
+end
+
 --- ⭐ 对局中实时激活一个城邦槽（池子里有、但未激活的那种）。
 -- @param iSlot  目标槽号（来自 CSF_FindInactiveCityStateSlot）
 -- @return true / false
@@ -114,6 +155,12 @@ function CSF_ActivateCityStateSlot(iSlot)
     -- ② 初始化玩家对象
     local ok2 = pcall(function() pm:InitializePlayer(iSlot) end);
     if not ok2 then return false end;
+
+    -- ②b ⭐ 补颜色（★ 唯一必须 DLL 的一步）
+    --   引擎初始化玩家时会写「颜色」属性；我们只调 InitializePlayer 会漏掉它，
+    --   后果：旗标无颜色 + 交互城邦时原生崩溃。
+    --   颜色的 setter（FUN_18016b390）**没有 Lua 包装**，所以只能由 C6FW 代劳。
+    CSF_ApplyCityStateColor(iSlot);
 
     -- ③ 复查
     local bAlive, pCities = nil, nil;
