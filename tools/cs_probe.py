@@ -7990,5 +7990,115 @@ async def main() -> None:
     await close_conn(writer)
 
 
+# ---- 26. 自定义城邦验证（能力重复 / 名字不同）------------------------
+PROBES["customcs"] = (
+    PRELUDE
+    + r"""
+
+P("==================== 自定义城邦验证 ====================")
+P("")
+
+-- ── ① 六个城邦是否注册进 GameInfo ────────────────────────────────────────
+P("== [1] GameInfo.Civilizations 里的自定义城邦 ==")
+local kWant = {
+  "CIVILIZATION_CSF_CS_01", "CIVILIZATION_CSF_CS_02", "CIVILIZATION_CSF_CS_03",
+  "CIVILIZATION_CSF_CS_04", "CIVILIZATION_CSF_CS_05", "CIVILIZATION_CSF_CS_06",
+}
+local kFound = {}
+for _, sType in ipairs(kWant) do
+  local row = safe(function() return GameInfo.Civilizations[sType] end)
+  if row == nil then
+    P(string.format("  ❌ %-24s 不存在", sType))
+  else
+    kFound[sType] = row
+    P(string.format("  ✅ %-24s level=%-32s name=%s", sType,
+      tostring(safe(function() return row.StartingCivilizationLevelType end)),
+      tostring(safe(function() return row.Name end))))
+  end
+end
+P(string.format("  → 找到 %d / %d", (function() local n=0 for _ in pairs(kFound) do n=n+1 end return n end)(), #kWant))
+
+-- ── ② 领袖 + 能力（★ 核心：能力重复）──────────────────────────────────────
+P("")
+P("== [2] 领袖与 LeaderTraits（★ 能力重复验证）==")
+local kTraitCount = {}
+for _, sCiv in ipairs(kWant) do
+  local sLeader = nil
+  -- 从 CivilizationLeaders 反查领袖（GameInfo 是 Iterable）
+  for row in GameInfo.CivilizationLeaders() do
+    if row.CivilizationType == sCiv then sLeader = row.LeaderType break end
+  end
+  if sLeader == nil then
+    P(string.format("  ❌ %-24s 没有 CivilizationLeaders 记录", sCiv))
+  else
+    local sTrait = nil
+    for row in GameInfo.LeaderTraits() do
+      if row.LeaderType == sLeader then sTrait = row.TraitType break end
+    end
+    P(string.format("  %-24s leader=%-32s trait=%s", sCiv, sLeader, tostring(sTrait)))
+    if sTrait ~= nil then
+      kTraitCount[sTrait] = (kTraitCount[sTrait] or 0) + 1
+    end
+  end
+end
+P("")
+P("  能力分布（同一 Trait 被多个城邦共用 = 能力重复成立）:")
+for sTrait, n in pairs(kTraitCount) do
+  P(string.format("    %-36s × %d %s", sTrait, n, (n > 1) and "← ★ 重复" or ""))
+end
+
+-- ── ③ 本局玩家里有没有它们 ────────────────────────────────────────────────
+P("")
+P("== [3] 本局玩家中的自定义城邦 ==")
+local iInGame = 0
+for i = 0, 63 do
+  local pc = safe(function() return PlayerConfigurations[i] end)
+  if pc ~= nil then
+    local sCiv = safe(function() return pc:GetCivilizationTypeName() end)
+    if sCiv ~= nil and string.find(sCiv, "CSF_CS_") then
+      iInGame = iInGame + 1
+      P(string.format("  slot %2d  %-24s status=%s", i, sCiv,
+        tostring(safe(function() return tostring(pc:GetSlotStatus()) end))))
+    end
+  end
+end
+if iInGame == 0 then
+  P("  （本局没有 —— 原因是：城邦是开局按数量创建玩家时才分配文明，")
+  P("    注册了 GameInfo 不等于本局就有。要它们出现需抬高城邦数量上限。）")
+end
+
+-- ── ④ DuplicateCivilizations 登记 ─────────────────────────────────────────
+P("")
+P("== [4] DuplicateCivilizations 登记（别名：允许与原版共存）==")
+local iDup = 0
+if GameInfo.DuplicateCivilizations ~= nil then
+  for row in GameInfo.DuplicateCivilizations() do
+    if string.find(tostring(row.CivilizationType), "CSF_CS_") then
+      iDup = iDup + 1
+      if iDup <= 6 then
+        P(string.format("  %-24s ↔ %s", row.CivilizationType, row.OtherCivilizationType))
+      end
+    end
+  end
+  P(string.format("  → 共 %d 条", iDup))
+else
+  P("  ⚠️ GameInfo.DuplicateCivilizations 不存在")
+end
+
+-- ── ⑤ 文案 ────────────────────────────────────────────────────────────────
+P("")
+P("== [5] 文案是否解析（不是 raw 键）==")
+for _, sTag in ipairs({"LOC_CSF_CS_01_NAME", "LOC_CSF_CS_03_NAME", "LOC_CSF_CS_05_NAME"}) do
+  P(string.format("  %-24s -> %s", sTag, tostring(safe(function() return Locale.Lookup(sTag) end))))
+end
+
+P("")
+P("==================== 验证结束 ====================")
+"""
+    + EPILOGUE
+)
+
+
 if __name__ == "__main__":
     asyncio.run(main())
+
