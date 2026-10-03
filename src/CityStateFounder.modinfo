@@ -55,11 +55,28 @@
          —— 所以开局设置界面的布局与默认值完全不变，只是滑条能拉更高。
          详细说明与注意事项见 Data/CSF_MapSizes.xml 内的注释。
          注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。 -->
+    <!-- ⛔⛔⛔ 【2026-10-04 重大修复】这里原本指向 Data/CSF_MapSizes.xml —— 那是错的！
+         后果（实测）：**游戏一启用本 mod 就 early exit，根本进不了对局。**
+           日志：LoadGameViewState leaving the network session due to an
+                 early exit of the game state.
+           （排查过程：禁用本 mod → 能开局；启用 → 6 秒后 early exit。）
+
+         根因：CSF_MapSizes.xml 把 MaxCityStates 抬到 9/15/21/27/33/36，
+               而 CCB Maps 的出生点分配循环【没有边界保护】——
+               出生点用完时 validspawnsleft[rng+1] 是 nil，索引它就崩：
+                 BBM_AssignStartingPlots.lua:353: attempt to index a nil value
+               地图生成失败 → 引擎 early exit。
+               （该 XML 自己的文件头就写着"⛔ 本文件当前【未注册】—— 因为实测会崩"，
+                 是 modinfo 这里被误改成了指向它。）
+
+         ✅ 正确做法：指向 Data/CSF_MapSizes.sql —— 那个文件【不修改任何值】，
+            只保留技术考证注释。想提高上限请走开局设置的【城邦数量滑条】，
+            且不要超过地图容量。 -->
     <UpdateDatabase id="CSF_MapSizes">
       <Properties>
         <LoadOrder>999999</LoadOrder>
       </Properties>
-      <File>Data/CSF_MapSizes.xml</File>
+      <File>Data/CSF_MapSizes.sql</File>
     </UpdateDatabase>
     <!-- ⚠️ 这里原本还挂了一条 CSF_CityStateCountRange，把滑条的【显示】上限映射回
          官方 X（标准图 18）—— 已【移除】。
@@ -236,5 +253,8 @@
     <File>UI/CSF_Panel.lua</File>
     <File>UI/CSF_UnitPanel.lua</File>
     <File>Text/CSF_Text.xml</File>
+    <File>Lua/CSF_CreateCityState.lua</File>
+    <File>UI/CSF_CopyRegistry.lua</File>
+    <File>UI/CSF_CityBannerPatch.lua</File>
   </Files>
 </Mod>

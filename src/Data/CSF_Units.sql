@@ -14,7 +14,7 @@
 -- ===========================================================================
 
 -- ① Types：Units.UnitType 有外键指向 Types(Type)，必须先插
-INSERT INTO Types (Type, Kind) VALUES ('UNIT_CSF_ENVOY', 'KIND_UNIT');
+INSERT OR IGNORE INTO Types (Type, Kind) VALUES ('UNIT_CSF_ENVOY', 'KIND_UNIT');
 
 -- ② Units 本体
 --    Cost = 150（按用户要求：标准生产力需求 150）
@@ -24,7 +24,7 @@ INSERT INTO Types (Type, Kind) VALUES ('UNIT_CSF_ENVOY', 'KIND_UNIT');
 --
 --    ⭐ PseudoYieldType【不设】（T-140）：原来设成 PSEUDOYIELD_UNIT_SETTLER，
 --       等于告诉 AI「这个单位值一个开拓者」。去掉后 AI 不再按开拓者给它估值。
-INSERT INTO Units (
+INSERT OR IGNORE INTO Units (
   UnitType, Name, Description,
   BaseSightRange, BaseMoves, Cost,
   Domain, FormationClass,
@@ -42,12 +42,23 @@ INSERT INTO Units (
   'YIELD_GOLD'
 );
 
--- ②b Units_XP2：只允许【主文明】拥有 —— 城邦与蛮族不能造/买（T-140）
---     已核实 Expansion2_Schema.sql 里 Units_XP2 有 "MajorCivOnly" BOOLEAN 列
-INSERT INTO Units_XP2 (UnitType, MajorCivOnly) VALUES ('UNIT_CSF_ENVOY', 1);
+-- ②b Units_XP2：⚠️⚠️ 【不要自己插！】
+--     实测（2026-10-04）：写 INSERT INTO Units_XP2 (UnitType, MajorCivOnly) VALUES (...) 会报
+--         [Gameplay] ERROR: UNIQUE constraint failed: Units_XP2.UnitType
+--     而且改成 INSERT OR IGNORE **照样报** —— 说明冲突不是我们这条引起的，
+--     而是【引擎的触发器】：Units 表上有触发器，插入新单位时会自动往 Units_XP2 补行。
+--     我们这条显式 INSERT 纯属多余，而且会让整份 SQL 报错。
+--
+--     后果非常严重：这个数据库错误会让【整个 mod 加载失败】——
+--     Lua.log 里一条 [CSF] 都没有、UNIT_CSF_ENVOY 不存在、
+--     并且**开局时引擎直接 early exit**（日志：LoadGameViewState leaving the network
+--     session due to an early exit of the game state）。
+--
+--     如需 MajorCivOnly 之类的 XP2 字段，请用 UPDATE（触发器已经建好行了）：
+UPDATE Units_XP2 SET MajorCivOnly = 1 WHERE UnitType = 'UNIT_CSF_ENVOY';
 
 -- ③ TypeTags：与开拓者同为陆地平民
-INSERT INTO TypeTags (Type, Tag) VALUES ('UNIT_CSF_ENVOY', 'CLASS_LANDCIVILIAN');
+INSERT OR IGNORE INTO TypeTags (Type, Tag) VALUES ('UNIT_CSF_ENVOY', 'CLASS_LANDCIVILIAN');
 
 -- ④ UnitAiInfos —— ⚠️ 表名是 UnitAiInfos【不是 UnitAiTypes】！
 --    （UnitAiTypes 的列是 AiType/TypeValue/Priority，与单位无关）
@@ -57,4 +68,4 @@ INSERT INTO TypeTags (Type, Tag) VALUES ('UNIT_CSF_ENVOY', 'CLASS_LANDCIVILIAN')
 --       注册了这个角色，于是 **AI 也会去造「建邦使节」**（用户反馈的问题）。
 --       去掉它之后，AI 没有任何代码路径会生产这个单位。
 --       保留 UNITTYPE_CIVILIAN 只是把它正确归类为平民单位（移动 / 被俘规则）。
-INSERT INTO UnitAiInfos (UnitType, AiType) VALUES ('UNIT_CSF_ENVOY', 'UNITTYPE_CIVILIAN');
+INSERT OR IGNORE INTO UnitAiInfos (UnitType, AiType) VALUES ('UNIT_CSF_ENVOY', 'UNITTYPE_CIVILIAN');
