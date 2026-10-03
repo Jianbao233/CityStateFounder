@@ -30,14 +30,17 @@ cmd += rest if rest else ["--port", "4318"]
 print(f"→ 执行 {lua_path.name}（{len(code)} 字节）")
 r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 out = (r.stdout or "") + (r.stderr or "")
-# 只打印响应主体，跳过状态列表（很长）
+# cs_probe 会先打印一长串 Lua 状态列表，只保留响应主体
 lines = out.splitlines()
-start = 0
-for i, l in enumerate(lines):
+keep = []
+started = False
+for l in lines:
     if "[响应]" in l:
-        start = i
-        break
-for l in lines[start:]:
+        started = True
+    if started:
+        keep.append(l)
+if not keep:
+    # 没拿到响应 → 原样打印尾部，便于看错误
+    keep = lines[-40:]
+for l in keep:
     print(l)
-if r.returncode not in (0, None):
-    print(f"[退出码 {r.returncode}]")
