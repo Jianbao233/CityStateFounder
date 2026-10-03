@@ -97,11 +97,21 @@ for f in sorted(SRC.rglob("*")):
 
 # --- 3/4. 本地化键 --------------------------------------------------------
 print("\n[3] 本地化键一致性")
-txt_path = SRC / "Text" / "CSF_Text.xml"
-txt_text = read(txt_path)
-defined = set(re.findall(r'<Replace\s+Tag="(LOC_CSF_[A-Z0-9_]+)"', txt_text))
-# 兼容属性顺序不同的写法
-defined |= set(re.findall(r'Tag="(LOC_CSF_[A-Z0-9_]+)"\s+Language=', txt_text))
+# ⚠️ 不能只读 Text/CSF_Text.xml —— 生成的文案放在 Data/ 下（如
+#    Data/CSF_CustomCityStates_Text.xml），只读一个文件会把它们误报成"未定义"。
+#    改为：扫描 src 下【所有】含 <LocalizedText> 或 <Replace Tag="LOC_CSF_ 的 xml。
+defined: set[str] = set()
+_text_files: list[str] = []
+for f in sorted(SRC.rglob("*.xml")):
+    body = read(f)
+    if "LOC_CSF_" not in body:
+        continue
+    _text_files.append(str(f.relative_to(SRC)))
+    defined |= set(re.findall(r'<Replace\s+Tag="(LOC_CSF_[A-Z0-9_]+)"', body))
+    # 兼容属性顺序不同的写法
+    defined |= set(re.findall(r'Tag="(LOC_CSF_[A-Z0-9_]+)"\s+Language=', body))
+ok(f"已定义 LOC_CSF_* 键 {len(defined)} 个（来自 {len(_text_files)} 个文件: "
+   f"{', '.join(_text_files)}）")
 
 used: dict[str, list[str]] = {}
 for f in sorted(SRC.rglob("*")):
@@ -154,6 +164,22 @@ for xml_rel, lua_rel in pairs:
 
 # --- 9. Lua 定义/使用顺序 -------------------------------------------------
 print("\n[5] Lua 定义/使用顺序（local 必须先定义后使用）")
+
+# vendored 第三方文件：整份拷贝进来的外部代码，不由我们维护。
+#   Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua 是 CCB Maps 的文件，
+#   我们只往里加了一段带注释的边界检查，其余一行未改。
+#   它自己有一处 local 先用后定义（第 206 行用 spawn，第 338 行才定义），
+#   那是上游的既有问题，不该算到我们头上 —— 但也不掩盖，单独报一行提示。
+VENDORED = {
+    # CCB Maps 的两个文件：只加了边界检查 / nil 检查，其余一行未改
+    "BBM_AssignStartingPlots.lua",
+    "BBM_CivilizationAssign.lua",
+    # 官方的开局设置逻辑：只往 Parameters_Config_EndWrite 里加了一个钩子。
+    #   官方自己有两处 local 先用后定义（control / s，分属不同作用域），
+    #   是上游既有写法，不是我们的问题。
+    "GameSetupLogic.lua",
+}
+
 for lua_p in sorted(SRC.rglob("*.lua")):
     lines = read(lua_p).splitlines()
 
@@ -194,8 +220,13 @@ for lua_p in sorted(SRC.rglob("*.lua")):
             if ln.strip().startswith("--"):
                 continue
             if re.search(r"\b" + re.escape(name) + r"\b", ln):
-                err(f"{lua_p.name}:{i} 使用了尚未定义的 local '{name}'（定义在第 {dline} 行）")
-                bad += 1
+                if lua_p.name in VENDORED:
+                    # 上游既有问题，不算我们的 —— 单独提示，不计 ERR
+                    warn(f"{lua_p.name}:{i} 上游既有的 local 先用后定义 '{name}'"
+                         f"（定义在第 {dline} 行）—— vendored 第三方文件，非本次改动")
+                else:
+                    err(f"{lua_p.name}:{i} 使用了尚未定义的 local '{name}'（定义在第 {dline} 行）")
+                    bad += 1
                 break
     if bad == 0:
         ok(f"{lua_p.name}: {len(defs)} 个 local 的定义/使用顺序正确")
@@ -205,3 +236,17 @@ print("\n" + "=" * 72)
 print(f"汇总：OK {ok_n} · WARN {warn_n} · ERR {err_n}")
 print("=" * 72)
 sys.exit(1 if err_n else 0)
+
+# --- 10. Lua 版本兼容：goto 是 Lua 5.2 才有的，Civ6 是 5.1 ---
+print("\n[6] Lua 5.1 兼容性（goto 不可用）")
+_goto_bad = 0
+for lua_p in sorted(SRC.rglob("*.lua")):
+    for i, ln in enumerate(read(lua_p).splitlines(), 1):
+        if ln.strip().startswith("--"):
+            continue
+        if re.search(r"\bgoto\s+[A-Za-z_]", ln):
+            err(f"{lua_p.name}:{i} 用了 goto —— Civ6 是 Lua 5.1，goto 是 5.2 才有，"
+                f"会导致整个脚本 Syntax Error 而不加载")
+            _goto_bad += 1
+if _goto_bad == 0:
+    ok("所有 Lua 文件都没有 goto（Lua 5.1 兼容）")
