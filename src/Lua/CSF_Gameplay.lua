@@ -1346,7 +1346,7 @@ local function CSF_NextCopySuffix(iSlot)
         end
     end);
     local tRoman = { "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X" };
-    local sSuffixNew = tRoman[iN] or ("x" .. tostring(iN + 2));
+    local sSuffixNew = tRoman[iN + 1] or ("x" .. tostring(iN + 2));   -- ★ tRoman 是 1 起始，iN 从 0 起
     return " " .. sSuffixNew;
 end
 

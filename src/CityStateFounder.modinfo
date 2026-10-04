@@ -111,18 +111,20 @@
          数据模型依据：实机数据库反查（docs/DLL版_调研设计与计划.md 附录 E）。
          SQL 由 tools/_gen_custom_cs.py 生成，加城邦改那个脚本即可。
          LoadOrder 取高值，确保晚于其它 mod 的城邦改动。 -->
-    <UpdateDatabase id="CSF_CustomCityStates" criteria="CSF_XP2">
+    <!-- ⭐ 城邦"自我共存"登记（2026-10-04）：让【同一个城邦能被复制多份】
+         DuplicateCivilizations 语义 = 两者可共存。官方 54 个城邦原本全都没有登记，
+         复制它们会让引擎崩溃（实测：造副本后点下一回合，游戏原生崩溃）。
+         本文件给每个城邦加一行 (X, X)。
+
+         ⛔ 同时【下架】了自制城邦（CSF_CustomCityStates）：我们自己搓的 6 个城邦
+            缺官方数据（城邦面板「类型」显示 unknownType），用户要求只用官方城邦。
+            文件与生成器保留在 Data/ 与 tools/ 下以备将来，但不再注册。 -->
+    <UpdateDatabase id="CSF_DuplicateCityStates" criteria="CSF_XP2">
       <Properties>
-        <LoadOrder>2100000</LoadOrder>
+        <LoadOrder>2100001</LoadOrder>
       </Properties>
-      <File>Data/CSF_CustomCityStates.sql</File>
+      <File>Data/CSF_DuplicateCityStates.sql</File>
     </UpdateDatabase>
-    <UpdateText id="CSF_CustomCityStates_Text" criteria="CSF_XP2">
-      <Properties>
-        <LoadOrder>2100000</LoadOrder>
-      </Properties>
-      <File>Data/CSF_CustomCityStates_Text.xml</File>
-    </UpdateText>
 
     <UpdateText id="CSF_Text_IG" criteria="CSF_XP2">
       <File>Text/CSF_Text.xml</File>
@@ -245,8 +247,7 @@
     <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
     <File>Data/BBS Maps/Utility/BBM_CivilizationAssign.lua</File>
     <File>Data/CSF_Units.sql</File>
-    <File>Data/CSF_CustomCityStates.sql</File>
-    <File>Data/CSF_CustomCityStates_Text.xml</File>
+    <File>Data/CSF_DuplicateCityStates.sql</File>
     <File>Lua/CSF_Gameplay.lua</File>
     <File>UI/CSF_Panel.xml</File>
     <File>UI/CSF_Panel.lua</File>
