@@ -127,6 +127,20 @@ local function CSF_Safe(f, ...)
 end
 
 -- ---------------------------------------------------------------------------
+-- 工具：安全取【多个】返回值
+--   ⚠️ 2026-10-04 新增：`CSF_Safe` 只返回**第一个**值，
+--      所以 `local iW, iH = CSF_Safe(function() return Map.GetGridSize() end)`
+--      会让 **iH 永远是 nil** → 地图边缘检查被静默跳过。
+--      这是实测发现的真 bug（`FindFoundLocation` 报 `no_map`）。
+--      `Map.GetGridSize()` 返回宽、高【两个】值，必须用这个版本取。
+-- ---------------------------------------------------------------------------
+local function CSF_Safe2(f, ...)
+    local ok, a, b, c = pcall(f, ...);
+    if ok then return a, b, c end;
+    return nil, nil, nil;
+end
+
+-- ---------------------------------------------------------------------------
 -- 统计某玩家当前拥有几个「建邦使节」（含地图外）
 -- ---------------------------------------------------------------------------
 local function CSF_CountEnvoys(iPlayerID)
@@ -175,7 +189,7 @@ local function CSF_IsValidFoundLocation(iX, iY, iFounderOwner)
     --    这里保守地留出边界余量，避免让玩家白跑一趟。
     --    ⚠️ API 已核实：`Map.GetGridWidth/GetGridHeight` **不存在**（DLL 命中 0），
     --       正确的是 **`Map.GetGridSize()`**（返回宽、高两个值）。
-    local iW, iH = CSF_Safe(function() return Map.GetGridSize() end);
+    local iW, iH = CSF_Safe2(function() return Map.GetGridSize() end);  -- ★ 必须用 Safe2，Safe 只返回一个值
     if iW ~= nil and iH ~= nil then
         if iX < 2 or iY < 2 or iX > (iW - 3) or iY > (iH - 3) then
             return false, "map_edge";
@@ -283,7 +297,7 @@ end
 -- @return iX, iY, sWhy  —— 失败时返回 -1, -1, 最后一次的拒绝原因
 -- ---------------------------------------------------------------------------
 local function CSF_FindFoundLocation(iFounderOwner)
-    local iW, iH = CSF_Safe(function() return Map.GetGridSize() end);
+    local iW, iH = CSF_Safe2(function() return Map.GetGridSize() end);  -- ★ 必须用 Safe2，Safe 只返回一个值
     if iW == nil or iH == nil then return -1, -1, "no_map" end;
 
     -- 记住原值，搜完恢复（这两个是 local 常量表外的可变开关）
