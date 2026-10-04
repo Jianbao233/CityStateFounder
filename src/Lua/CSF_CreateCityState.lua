@@ -169,7 +169,25 @@ function CSF_ApplyCityStateColor(iSlot)
     return false;
 end
 
---- ⭐ 对局中实时激活一个城邦槽（池子里有、但未激活的那种）。
+--- ⭐⭐ 对局中实时激活一个城邦槽（池子里有、但未激活的那种）。
+--
+-- ★★★ 2026-10-04 重大更新：**改用 DLL 的完整激活链**。
+--
+--   为什么换：
+--     旧实现走 `SetPlayerSlotStatus(1)` + `InitializePlayer(slot)`。
+--     Lua 的 `InitializePlayer` 进的是 `FUN_1806175f0 → FUN_180617370` 那条【浅】路径，
+--     它**从不调用真正的激活函数 `FUN_1802f9350`**（那个函数初始化玩家的 16 个子系统）。
+--     结果：玩家对象是"半成品" —— 点下一回合 AI 处理时**原生崩溃**（实测多次）。
+--
+--   新实现（DLL 补上缺的那一环）：
+--     ① `C6FW.ActivatePlayer(slot)`  —— 创建游戏侧玩家对象 + 16 子系统初始化
+--     ② `SetPlayerSlotStatus(slot, 1)` —— 槽位状态 5 → 1（Lua 本来就能做）
+--     ③ `C6FW.SetAlive(slot, 1)`       —— 置 IsAlive（写 player+0x258）
+--     ④ `CSF_ApplyCityStateColor(slot)` —— 补色（尽力而为；旗标另有三级兜底）
+--
+--   ⚠️ 没有 C6FW 时**拒绝激活**而不是退回旧路径 —— 旧路径会崩游戏，
+--      宁可"不做事"也不能"做错事"。
+--
 -- @param iSlot  目标槽号（来自 CSF_FindInactiveCityStateSlot）
 -- @return true / false
 function CSF_ActivateCityStateSlot(iSlot)
@@ -178,28 +196,51 @@ function CSF_ActivateCityStateSlot(iSlot)
     if pm == nil then return false end;
     if iSlot == nil or iSlot < 0 then return false end;
 
-    -- ① 设槽位状态为 AI（内部枚举 1）—— 绕过 FUN_180617370 的门
-    local ok1 = pcall(function() pm:SetPlayerSlotStatus(iSlot, CSF_SLOT_AI) end);
-    if not ok1 then return false end;
+    -- ★ 前置检查：没有 C6FW 就不做（旧路径会崩）
+    if C6FW == nil or C6FW.ActivatePlayer == nil then
+        print("[CSF] ⛔ 拒绝激活 slot " .. tostring(iSlot)
+              .. "：C6FW.ActivatePlayer 不可用。");
+        print("[CSF]    原因：Lua 的 InitializePlayer 不会调用引擎的完整激活函数，"
+              .. "激活出的玩家是半成品，点下一回合会崩游戏。");
+        return false;
+    end
 
-    -- ② 初始化玩家对象
-    local ok2 = pcall(function() pm:InitializePlayer(iSlot) end);
-    if not ok2 then return false end;
+    -- ① ★ DLL：创建游戏侧玩家对象 + 16 个子系统初始化
+    local okA, rA = pcall(C6FW.ActivatePlayer, iSlot);
+    if not okA or rA == nil then
+        print("[CSF] ❌ ActivatePlayer 失败 slot=" .. tostring(iSlot)
+              .. " err=" .. tostring(rA));
+        return false;
+    end
 
-    -- ②b ⭐ 补颜色（★ 唯一必须 DLL 的一步）
-    --   引擎初始化玩家时会写「颜色」属性；我们只调 InitializePlayer 会漏掉它，
-    --   后果：旗标无颜色 + 交互城邦时原生崩溃。
-    --   颜色的 setter（FUN_18016b390）**没有 Lua 包装**，所以只能由 C6FW 代劳。
+    -- ② 槽位状态 5 → 1（Lua 的 API 本来就能做）
+    pcall(function() pm:SetPlayerSlotStatus(iSlot, CSF_SLOT_AI) end);
+
+    -- ③ ★ DLL：置 IsAlive（写 player + 0x258）
+    if C6FW.SetAlive ~= nil then
+        local okS, rS = pcall(C6FW.SetAlive, iSlot, 1);
+        if not okS or rS == nil then
+            print("[CSF] ⚠️ SetAlive 失败 slot=" .. tostring(iSlot) .. "（继续尝试）");
+        end
+    end
+
+    -- ④ 补色（尽力而为；旗标侧另有三级兜底，失败也不会崩）
     CSF_ApplyCityStateColor(iSlot);
 
-    -- ③ 复查
-    local bAlive, pCities = nil, nil;
+    -- ⑤ 复查：三项都要对
+    local bAlive, pCities, iStatus = nil, nil, nil;
     pcall(function() bAlive = Players[iSlot]:IsAlive() end);
     pcall(function() pCities = Players[iSlot]:GetCities() end);
-    if bAlive ~= true or pCities == nil then return false end;
+    pcall(function() iStatus = PlayerConfigurations[iSlot]:GetSlotStatus() end);
+    if bAlive ~= true or pCities == nil then
+        print("[CSF] ❌ 激活复查失败 slot=" .. tostring(iSlot)
+              .. " alive=" .. tostring(bAlive) .. " cities=" .. tostring(pCities ~= nil));
+        return false;
+    end
 
-    print("[CSF] 城邦槽 " .. tostring(iSlot) .. " 已激活（" ..
-          tostring(PlayerConfigurations[iSlot]:GetCivilizationTypeName()) .. "）");
+    print("[CSF] ✅ 城邦槽 " .. tostring(iSlot) .. " 已完整激活（"
+          .. tostring(PlayerConfigurations[iSlot]:GetCivilizationTypeName())
+          .. "）alive=true status=" .. tostring(iStatus));
     return true;
 end
 
@@ -217,15 +258,19 @@ function CSF_CreateCityStateAt(sCivType, iX, iY)
         print("[CSF] 激活失败 slot=" .. tostring(iSlot));
         return false;
     end
-    local ok, pCity = pcall(function()
-        return Players[iSlot]:GetCities():Create(iX, iY);
+    -- ⚠️⚠️ 2026-10-04：**不要用 `Cities:Create`！**
+    --   实测：`Cities:Create(x,y)` 对中途激活的城邦会**静默失败并损伤城邦**
+    --   （记录在案的 T-123）。正确做法是放一个 `UNIT_SETTLER`，
+    --   让引擎在城邦自己的回合建城 —— 走引擎的正规建城流程。
+    local ok, r = pcall(function()
+        return UnitManager.InitUnit(iSlot, "UNIT_SETTLER", iX, iY);
     end);
-    if not ok or pCity == nil then
-        print("[CSF] 建城失败 slot=" .. tostring(iSlot));
+    if not ok or r == nil then
+        print("[CSF] ❌ 放移民失败 slot=" .. tostring(iSlot) .. " err=" .. tostring(r));
         return false;
     end
-    print("[CSF] ✅ 城邦 " .. tostring(sCiv) .. " 已建在 (" ..
-          tostring(iX) .. "," .. tostring(iY) .. ")");
+    print("[CSF] ✅ 城邦 " .. tostring(sCiv) .. " 的移民已放在 (" ..
+          tostring(iX) .. "," .. tostring(iY) .. ")，将在它的回合自行建城");
     return true, iSlot, sCiv;
 end
 
