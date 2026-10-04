@@ -75,7 +75,7 @@ local CSF_ALLOW_RETARGET = false;
 --   否则引擎不会按新文明重建颜色/名字（这就是当年 CSF_ALLOW_RETARGET 出半成品的原因）。
 --   详见下方 CSF_FoundCityStateCopy 的头注释。
 -- ───────────────────────────────────────────────────────────────────────────
-local CSF_ENABLE_COPY = true;
+local CSF_ENABLE_COPY = false;
 
 -- 引擎内部的槽位状态枚举（**不是** Lua 的 SS_*）
 --   逆向依据：FUN_180617370 只在状态 ∈ {0,1,3} 时才真正初始化玩家；
@@ -692,9 +692,17 @@ local CSF_KEEP_ACTIVE_ON_MAP = -2;
 --   这条路，看这里的结论即可，不必再踩一遍。
 --
 --   取值：
---     0  = 关闭（**默认，也是唯一推荐值**）
---     N  = 额外造 N 个（⚠️ 已知缺颜色 + 破坏城邦面板，仅供研究）
-local CSF_EXTRA_DORMANT_COUNT = 0;
+--     0  = 关闭
+--     N  = 额外造 N 个
+--
+--   ⭐⭐ 2026-10-04 重新启用（用户需求："可重复建城邦，能力相同即可"）：
+--      当初否决的两个原因**现在都已修好**：
+--        ① "缺颜色"         → 已补 PlayerColors 表（Data/CSF_CityStateColors.sql）
+--        ② "破坏城邦面板"   → 已补 TypeProperties + CityStates 表
+--                              （Data/CSF_CustomCityStates.sql + CSF_CityStatePicker.sql）
+--      而"复制一个已存在的文明"那条路（CSF_ENABLE_COPY）实测会让引擎原生崩溃，
+--      所以正路就是这条：**开局凭空多造几个【本局没有的】城邦玩家**。
+local CSF_EXTRA_DORMANT_COUNT = 6;
 
 -- 额外城邦是否补起始位置（实验用，同样已否决）
 --   ⚠️ 实测把这项打开后，游戏在开局后【立刻死亡】，比不补更糟 ——

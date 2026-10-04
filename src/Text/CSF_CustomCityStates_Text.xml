@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GameData>
+  <LocalizedText>
+    <Row Tag="LOC_CSF_CS_01_NAME" Language="zh_Hans_CN"><Text>新亚历山大</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_NAME" Language="en_US"><Text>Neo Alexandria</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_DESC" Language="zh_Hans_CN"><Text>新亚历山大（自定义城邦）</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_DESC" Language="en_US"><Text>Neo Alexandria (custom city-state)</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_ADJ" Language="zh_Hans_CN"><Text>新亚历山大</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_ADJ" Language="en_US"><Text>Neo Alexandria</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_LEADER" Language="zh_Hans_CN"><Text>新亚历山大执政官</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_LEADER" Language="en_US"><Text>Neo Alexandria Archon</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_CITY" Language="zh_Hans_CN"><Text>新亚历山大</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_CITY" Language="en_US"><Text>Neo Alexandria</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_BONUS" Language="zh_Hans_CN"><Text>派遣1位使者：首都和每座图书馆+1科技值。</Text></Row>
+    <Row Tag="LOC_CSF_CS_01_BONUS" Language="en_US"><Text>+1 Science from your Capital and every Library once you send 1 Envoy.</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_NAME" Language="zh_Hans_CN"><Text>新孟菲斯</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_NAME" Language="en_US"><Text>Neo Memphis</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_DESC" Language="zh_Hans_CN"><Text>新孟菲斯（自定义城邦）</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_DESC" Language="en_US"><Text>Neo Memphis (custom city-state)</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_ADJ" Language="zh_Hans_CN"><Text>新孟菲斯</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_ADJ" Language="en_US"><Text>Neo Memphis</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_LEADER" Language="zh_Hans_CN"><Text>新孟菲斯执政官</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_LEADER" Language="en_US"><Text>Neo Memphis Archon</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_CITY" Language="zh_Hans_CN"><Text>新孟菲斯</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_CITY" Language="en_US"><Text>Neo Memphis</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_BONUS" Language="zh_Hans_CN"><Text>派遣1位使者：首都和每座图书馆+1科技值。</Text></Row>
+    <Row Tag="LOC_CSF_CS_02_BONUS" Language="en_US"><Text>+1 Science from your Capital and every Library once you send 1 Envoy.</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_NAME" Language="zh_Hans_CN"><Text>新乌鲁克</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_NAME" Language="en_US"><Text>Neo Uruk</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_DESC" Language="zh_Hans_CN"><Text>新乌鲁克（自定义城邦）</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_DESC" Language="en_US"><Text>Neo Uruk (custom city-state)</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_ADJ" Language="zh_Hans_CN"><Text>新乌鲁克</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_ADJ" Language="en_US"><Text>Neo Uruk</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_LEADER" Language="zh_Hans_CN"><Text>新乌鲁克执政官</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_LEADER" Language="en_US"><Text>Neo Uruk Archon</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_CITY" Language="zh_Hans_CN"><Text>新乌鲁克</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_CITY" Language="en_US"><Text>Neo Uruk</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_BONUS" Language="zh_Hans_CN"><Text>派遣1位使者：首都和每座剧院广场+1文化值。</Text></Row>
+    <Row Tag="LOC_CSF_CS_03_BONUS" Language="en_US"><Text>+1 Culture from your Capital and every Theater Square once you send 1 Envoy.</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_NAME" Language="zh_Hans_CN"><Text>新尼尼微</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_NAME" Language="en_US"><Text>Neo Nineveh</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_DESC" Language="zh_Hans_CN"><Text>新尼尼微（自定义城邦）</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_DESC" Language="en_US"><Text>Neo Nineveh (custom city-state)</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_ADJ" Language="zh_Hans_CN"><Text>新尼尼微</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_ADJ" Language="en_US"><Text>Neo Nineveh</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_LEADER" Language="zh_Hans_CN"><Text>新尼尼微执政官</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_LEADER" Language="en_US"><Text>Neo Nineveh Archon</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_CITY" Language="zh_Hans_CN"><Text>新尼尼微</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_CITY" Language="en_US"><Text>Neo Nineveh</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_BONUS" Language="zh_Hans_CN"><Text>派遣1位使者：首都和每座剧院广场+1文化值。</Text></Row>
+    <Row Tag="LOC_CSF_CS_04_BONUS" Language="en_US"><Text>+1 Culture from your Capital and every Theater Square once you send 1 Envoy.</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_NAME" Language="zh_Hans_CN"><Text>新迦太基</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_NAME" Language="en_US"><Text>Neo Carthage</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_DESC" Language="zh_Hans_CN"><Text>新迦太基（自定义城邦）</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_DESC" Language="en_US"><Text>Neo Carthage (custom city-state)</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_ADJ" Language="zh_Hans_CN"><Text>新迦太基</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_ADJ" Language="en_US"><Text>Neo Carthage</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_LEADER" Language="zh_Hans_CN"><Text>新迦太基执政官</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_LEADER" Language="en_US"><Text>Neo Carthage Archon</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_CITY" Language="zh_Hans_CN"><Text>新迦太基</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_CITY" Language="en_US"><Text>Neo Carthage</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_BONUS" Language="zh_Hans_CN"><Text>派遣1位使者：首都和每座商业中心+1金币。</Text></Row>
+    <Row Tag="LOC_CSF_CS_05_BONUS" Language="en_US"><Text>+1 Gold from your Capital and every Commercial Hub once you send 1 Envoy.</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_NAME" Language="zh_Hans_CN"><Text>新推罗</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_NAME" Language="en_US"><Text>Neo Tyre</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_DESC" Language="zh_Hans_CN"><Text>新推罗（自定义城邦）</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_DESC" Language="en_US"><Text>Neo Tyre (custom city-state)</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_ADJ" Language="zh_Hans_CN"><Text>新推罗</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_ADJ" Language="en_US"><Text>Neo Tyre</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_LEADER" Language="zh_Hans_CN"><Text>新推罗执政官</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_LEADER" Language="en_US"><Text>Neo Tyre Archon</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_CITY" Language="zh_Hans_CN"><Text>新推罗</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_CITY" Language="en_US"><Text>Neo Tyre</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_BONUS" Language="zh_Hans_CN"><Text>派遣1位使者：首都和每座商业中心+1金币。</Text></Row>
+    <Row Tag="LOC_CSF_CS_06_BONUS" Language="en_US"><Text>+1 Gold from your Capital and every Commercial Hub once you send 1 Envoy.</Text></Row>
+  </LocalizedText>
+</GameData>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 城邦缔造者 —— 城邦选择器参数（配置库）
+     照工坊 3591345334 的 Config.xml：挂到 ConfigurationId=SelectCityStates，
+     这样 6 个城邦会出现在开局的【官方城邦选择器】里。 -->
+<GameInfo>
+  <Parameters>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_01" Name="LOC_CSF_CS_01_NAME" Description="LOC_CSF_CS_01_DESC" Domain="bool" DefaultValue="0" ConfigurationGroup="Map" ConfigurationId="LEADER_MINOR_CIV_CSF_CS_01" GroupId="MapOptions" SortIndex="901"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_02" Name="LOC_CSF_CS_02_NAME" Description="LOC_CSF_CS_02_DESC" Domain="bool" DefaultValue="0" ConfigurationGroup="Map" ConfigurationId="LEADER_MINOR_CIV_CSF_CS_02" GroupId="MapOptions" SortIndex="902"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_03" Name="LOC_CSF_CS_03_NAME" Description="LOC_CSF_CS_03_DESC" Domain="bool" DefaultValue="0" ConfigurationGroup="Map" ConfigurationId="LEADER_MINOR_CIV_CSF_CS_03" GroupId="MapOptions" SortIndex="903"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_04" Name="LOC_CSF_CS_04_NAME" Description="LOC_CSF_CS_04_DESC" Domain="bool" DefaultValue="0" ConfigurationGroup="Map" ConfigurationId="LEADER_MINOR_CIV_CSF_CS_04" GroupId="MapOptions" SortIndex="904"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_05" Name="LOC_CSF_CS_05_NAME" Description="LOC_CSF_CS_05_DESC" Domain="bool" DefaultValue="0" ConfigurationGroup="Map" ConfigurationId="LEADER_MINOR_CIV_CSF_CS_05" GroupId="MapOptions" SortIndex="905"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_06" Name="LOC_CSF_CS_06_NAME" Description="LOC_CSF_CS_06_DESC" Domain="bool" DefaultValue="0" ConfigurationGroup="Map" ConfigurationId="LEADER_MINOR_CIV_CSF_CS_06" GroupId="MapOptions" SortIndex="906"/>
+  </Parameters>
+  <ParameterDependencies>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_01" ConfigurationGroup="Map" ConfigurationId="SelectCityStates" Operator="Equals" ConfigurationValue="1"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_02" ConfigurationGroup="Map" ConfigurationId="SelectCityStates" Operator="Equals" ConfigurationValue="1"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_03" ConfigurationGroup="Map" ConfigurationId="SelectCityStates" Operator="Equals" ConfigurationValue="1"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_04" ConfigurationGroup="Map" ConfigurationId="SelectCityStates" Operator="Equals" ConfigurationValue="1"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_05" ConfigurationGroup="Map" ConfigurationId="SelectCityStates" Operator="Equals" ConfigurationValue="1"/>
+    <Row ParameterId="LEADER_MINOR_CIV_CSF_CS_06" ConfigurationGroup="Map" ConfigurationId="SelectCityStates" Operator="Equals" ConfigurationValue="1"/>
+  </ParameterDependencies>
+</GameInfo>
