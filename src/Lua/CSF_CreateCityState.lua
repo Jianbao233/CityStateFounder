@@ -235,5 +235,16 @@ ExposedMembers.CSF_CreateCityState = ExposedMembers.CSF_CreateCityState or {};
 ExposedMembers.CSF_CreateCityState.CreateAt            = CSF_CreateCityStateAt;
 ExposedMembers.CSF_CreateCityState.ActivateSlot        = CSF_ActivateCityStateSlot;
 ExposedMembers.CSF_CreateCityState.FindInactiveSlot    = CSF_FindInactiveCityStateSlot;
+-- ⚠️ 2026-10-04：原来漏了这一行 —— 补色函数一直没被导出，
+--    所以外部（验收探针 / 其它脚本）调不到它。
+ExposedMembers.CSF_CreateCityState.ApplyColor          = CSF_ApplyCityStateColor;
+
+-- ⭐ 同时挂到 ExposedMembers.CSF（面板/游戏逻辑那一侧用的表），
+--    这样 CSF.ActivateCityState 也能一并补色 —— 激活与补色应当成对出现。
+ExposedMembers.CSF = ExposedMembers.CSF or {};
+ExposedMembers.CSF.ApplyCityStateColor  = CSF_ApplyCityStateColor;
+ExposedMembers.CSF.ActivateCityState    = CSF_ActivateCityStateSlot;
+ExposedMembers.CSF.FindInactiveCityStateSlot = CSF_FindInactiveCityStateSlot;
+ExposedMembers.CSF.CreateCityStateAt    = CSF_CreateCityStateAt;
 
 print("[CSF] CSF_CreateCityState.lua loaded（实时创建城邦：三步公式已就绪）");
