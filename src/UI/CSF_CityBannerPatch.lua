@@ -95,39 +95,55 @@ function CityBanner:UpdateColor()
 
     local darkerBackColor:number = UI.DarkenLightenColor(backColor, (-85), 238);
 
-    -- ↓↓↓ 以下与原版 CityBannerManager.lua:721-751 逐行一致 ↓↓↓
-    if (self.m_Type == BANNERTYPE_CITY_CENTER) then
-        self.m_Instance.CityBannerFill:SetColor( backColor );
-        self.m_Instance.CityBannerFillOver:SetColor( frontColor );
-        self.m_Instance.CityBannerFillOut:SetColor( frontColor );
-        self.m_Instance.CityName:SetColor( frontColor, 0 );
-        self.m_Instance.CityName:SetColor( darkerBackColor, 1 );
-        self.m_Instance.CityPopulation:SetColor( frontColor, 0 );
-        self.m_Instance.CityPopulation:SetColor( backColor, 1 );
-        if not self:IsTeam() then
-            self.m_Instance.CivIcon:SetColor( frontColor );
-        end
-    elseif (self.m_Type == BANNERTYPE_AERODROME) then
-        self.m_Instance.AerodromeUnitsButton_Base:SetColor( backColor );
-        self.m_Instance.AerodromeMouseOver:SetColor( frontColor );
-        self.m_Instance.AerodromeMouseOut:SetColor( frontColor );
-        self.m_Instance.AerodromeUnitsButtonIcon:SetColor( frontColor );
-    elseif (self.m_Type == BANNERTYPE_MISSILE_SILO) then
-        if self.m_Instance.Banner_Base ~= nil then
-            self.m_Instance.Banner_Base:SetColor( backColor );
-            self.m_Instance.NukeCountLabel:SetColor( frontColor );
-            self.m_Instance.ThermoNukeCountLabel:SetColor( frontColor );
-        end
-    elseif (self.m_Type == BANNERTYPE_ENCAMPMENT) then
-        if self.m_Instance.Banner_Base ~= nil then
-            self.m_Instance.Banner_Base:SetColor( backColor );
-        end
-    elseif (self.m_Type == BANNERTYPE_OTHER_DISTRICT) then
-        if self.m_Instance.Banner_Base ~= nil then
-            self.m_Instance.Banner_Base:SetColor( backColor );
+    -- ⚠️⚠️⚠️ 【2026-10-04 重大修正】每个 SetColor 都必须判 nil！
+    --
+    --   踩到的坑：我原先照抄的是
+    --       F:\...\Base\Assets\UI\WorldView\CityBannerManager.lua
+    --   但游戏实际加载的是【资料片 2 的那一份】：
+    --       F:\...\DLC\Expansion2\UI\CityBanners\CityBannerManager.lua
+    --   两者结构不同（XP2 版没有 m_Instance.CityPopulation 之类），
+    --   于是 `self.m_Instance.CityPopulation:SetColor(...)` 直接报
+    --       Runtime Error: CSF_CityBannerPatch.lua:105: ...
+    --   而 UpdateColor 每帧都跑 → 报错刷屏 → 旗标/面板系统全坏
+    --   （用户实测：点下一回合后城市面板消失）。
+    --
+    --   → 结论：**不要假设控件存在**。所有 SetColor 一律走 CSF_SetColorIfAny，
+    --     缺控件就静默跳过。这样无论加载 Base 还是 XP2 的版本都不会崩。
+    local function CSF_SetColorIfAny(pControl, color, layer)
+        if pControl == nil then return end;
+        if layer == nil then
+            pControl:SetColor( color );
+        else
+            pControl:SetColor( color, layer );
         end
     end
-    -- ↑↑↑ 原版到此为止（后面是 SetHealthBarColor 等其他函数）↑↑↑
+
+    if (self.m_Type == BANNERTYPE_CITY_CENTER) then
+        CSF_SetColorIfAny( self.m_Instance.CityBannerFill,     backColor );
+        CSF_SetColorIfAny( self.m_Instance.CityBannerFillOver, frontColor );
+        CSF_SetColorIfAny( self.m_Instance.CityBannerFillOut,  frontColor );
+        CSF_SetColorIfAny( self.m_Instance.CityName,           frontColor, 0 );
+        CSF_SetColorIfAny( self.m_Instance.CityName,           darkerBackColor, 1 );
+        -- ↓ 这两行在 Base 版里有、XP2 版里没有 → 必须判 nil
+        CSF_SetColorIfAny( self.m_Instance.CityPopulation,     frontColor, 0 );
+        CSF_SetColorIfAny( self.m_Instance.CityPopulation,     backColor, 1 );
+        if not self:IsTeam() then
+            CSF_SetColorIfAny( self.m_Instance.CivIcon,        frontColor );
+        end
+    elseif (self.m_Type == BANNERTYPE_AERODROME) then
+        CSF_SetColorIfAny( self.m_Instance.AerodromeUnitsButton_Base, backColor );
+        CSF_SetColorIfAny( self.m_Instance.AerodromeMouseOver,        frontColor );
+        CSF_SetColorIfAny( self.m_Instance.AerodromeMouseOut,         frontColor );
+        CSF_SetColorIfAny( self.m_Instance.AerodromeUnitsButtonIcon,  frontColor );
+    elseif (self.m_Type == BANNERTYPE_MISSILE_SILO) then
+        CSF_SetColorIfAny( self.m_Instance.Banner_Base,          backColor );
+        CSF_SetColorIfAny( self.m_Instance.NukeCountLabel,       frontColor );
+        CSF_SetColorIfAny( self.m_Instance.ThermoNukeCountLabel, frontColor );
+    elseif (self.m_Type == BANNERTYPE_ENCAMPMENT) then
+        CSF_SetColorIfAny( self.m_Instance.Banner_Base,          backColor );
+    elseif (self.m_Type == BANNERTYPE_OTHER_DISTRICT) then
+        CSF_SetColorIfAny( self.m_Instance.Banner_Base,          backColor );
+    end
 end
 
 print("[CSF] CSF_CityBannerPatch.lua loaded（旗标颜色兜底，逐行对齐原版）");
