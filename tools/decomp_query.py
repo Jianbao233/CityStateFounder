@@ -126,8 +126,8 @@ def main() -> int:
             return 1
         print(f"  {rec['name']} 调用 {len(rec.get('callees') or [])} 个函数：")
         for c in rec.get("callees") or []:
-            r2 = idx.get(c.lstrip("0x").lower())
-            desc = (r2.get("decompiled_code") or "").strip().splitlines()
+            r2 = idx.get(c.replace("FUN_", "").lstrip("0x").lower())
+            desc = ((r2 or {}).get("decompiled_code") or "").strip().splitlines()
             hint = desc[0][:70] if desc else "（无正文）"
             print(f"    {c}  {hint}")
         print()
