@@ -188,15 +188,6 @@
                CityBanner:UpdateColor()，颜色为 nil 时用源城邦颜色 / 按文明取色兜底。
          同时给副本拼名字后缀（" II"）。
          注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。 -->
-    <ImportFiles id="CSF_BANNER_IMPORT">
-      <Properties>
-        <LoadOrder>1003</LoadOrder>
-      </Properties>
-      <Items>
-        <File>UI/CSF_CopyRegistry.lua</File>
-        <File>UI/CSF_CityBannerPatch.lua</File>
-      </Items>
-    </ImportFiles>
     <ReplaceUIScript id="CSF_REPLACE_CITYBANNER">
       <Properties>
         <LoadOrder>500001</LoadOrder>
@@ -204,6 +195,14 @@
         <LuaReplace>UI/CSF_CityBannerPatch.lua</LuaReplace>
       </Properties>
     </ReplaceUIScript>
+    <ImportFiles id="CSF_BANNER_IMPORT">
+      <Properties>
+        <LoadOrder>1003</LoadOrder>
+      </Properties>
+      <Items>
+        <File>UI/CSF_CityBannerPatch.lua</File>
+      </Items>
+    </ImportFiles>
       <!-- ⭐⭐ CCB Maps 崩溃修复补丁（T-155）
          覆盖 CCB Maps 的 Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua。
          该文件【只有 CCB Maps / BBM 提供】，其他任何地图 mod 都不碰它，

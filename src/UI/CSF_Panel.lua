@@ -16,6 +16,13 @@
 
 include("InstanceManager");
 
+-- ⭐ 旗标颜色兜底（2026-10-04）
+--   本上下文（InGame）里 UI 表可用，所以在这里包装 UI.GetPlayerColors。
+--   ⚠️ 千万不要用 ReplaceUIScript 去替换 CityBannerManager —— 那会连带旗标的
+--      显示/隐藏逻辑一起替换掉，结果是"不崩但旗标不显示"（已踩两次）。
+--   顺序：先 CopyRegistry（提供 CSF_GetCopySource），再 BannerColorFix。
+include("CSF_CopyRegistry");
+
 print("[CSF] CSF_Panel.lua loading (InGame context)");
 
 -- ---------------------------------------------------------------------------

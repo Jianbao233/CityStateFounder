@@ -1428,8 +1428,33 @@ local function CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID)
     print("[CSF] copy: 复用休眠槽 " .. tostring(iVictim) .. " 作副本，目标类别=" ..
           tostring(sTargetCat));
 
-    -- ③ ★ 核心：释放 → 改文明 → 重新初始化（顺序不可换）
+    -- ③ ★★ 核心：释放休眠槽 → AddPlayer 拿回它 → 改文明（顺序不可换）
+    --
+    --   ⚠️⚠️⚠️ 2026-10-04 修正：**绝对不要用 SetPlayerSlotStatus + InitializePlayer！**
+    --      那条路实测会让游戏在【点下一回合】时原生崩溃（无 Lua 报错、无转储）。
+    --      原因：InitializePlayer 是"手工初始化一个已存在的槽"，玩家处于
+    --      "引擎认为已存在、但 AI 数据不全"的状态，AI 回合处理时踩空。
+    --
+    --      正确做法（本文件 1519-1596 行早已验证过的流程）：
+    --        UninitializePlayer(休眠槽)  →  AddPlayer(true)  →  SetPlayerLeader
+    --        →  SetRandomMinorStartingPosition  →  放 UNIT_SETTLER
+    --      这样玩家是引擎【新建】的，初始化完整；而且拿回的是"开局就存在"的槽，
+    --      UI 的颜色表认识它（否则旗标取不到颜色）。
     pcall(function() pm:UninitializePlayer(iVictim) end);
+
+    -- ⭐ 用 AddPlayer 把那个槽【重新拿回来】（这一步不能省！）
+    local iNew = nil;
+    pcall(function() iNew = pm:AddPlayer(true) end);
+    if iNew == nil or iNew == -1 then
+        print("[CSF] copy: AddPlayer 失败（空槽可能已用尽）");
+        return false, "no_free_slot";
+    end
+    if iNew ~= iVictim then
+        print("[CSF] copy: NOTE 拿到的槽 " .. tostring(iNew) ..
+              " 不同于释放的槽 " .. tostring(iVictim) .. "（颜色可能仍缺失）");
+    end
+    iVictim = iNew;
+
     local bSet = pcall(function()
         pm:SetPlayerLeader(iVictim, sLeader, sCiv, "CIVILIZATION_LEVEL_CITY_STATE");
     end);
@@ -1437,11 +1462,6 @@ local function CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID)
         print("[CSF] copy: SetPlayerLeader 失败");
         return false, "set_leader_failed";
     end
-    -- ⭐ 重新初始化：让引擎按【新文明】重建颜色/名字/特性
-    --    引擎的门要求槽位状态 ∈ {0,1,3}（预注册城邦槽是 5，会被静默拒绝）
-    pcall(function() pm:SetPlayerSlotStatus(iVictim, CSF_SLOT_AI) end);
-    local bInit = pcall(function() pm:InitializePlayer(iVictim) end);
-    print("[CSF] copy: 重新初始化 ok=" .. tostring(bInit));
 
     -- ④ 补起始位置（DLL 提示："Players without start positions will be removed."）
     pcall(function() pm:SetRandomMinorStartingPosition(iVictim) end);
