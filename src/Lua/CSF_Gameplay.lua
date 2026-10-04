@@ -75,7 +75,7 @@ local CSF_ALLOW_RETARGET = false;
 --   否则引擎不会按新文明重建颜色/名字（这就是当年 CSF_ALLOW_RETARGET 出半成品的原因）。
 --   详见下方 CSF_FoundCityStateCopy 的头注释。
 -- ───────────────────────────────────────────────────────────────────────────
-local CSF_ENABLE_COPY = false;
+local CSF_ENABLE_COPY = true;
 
 -- 引擎内部的槽位状态枚举（**不是** Lua 的 SS_*）
 --   逆向依据：FUN_180617370 只在状态 ∈ {0,1,3} 时才真正初始化玩家；
@@ -1472,6 +1472,27 @@ local function CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID)
 
     -- ④ 补起始位置（DLL 提示："Players without start positions will be removed."）
     pcall(function() pm:SetRandomMinorStartingPosition(iVictim) end);
+
+    -- ④b ★★★ 2026-10-04：**用 DLL 完整激活**（这一步以前完全没有！）
+    --
+    --   为什么必需：`SetPlayerLeader` 只是把文明/领袖**写在配置上**，
+    --   游戏侧玩家对象并没有被创建和初始化。引擎开局的激活链
+    --   （FUN_180228580 → FUN_1802f9350，16 个子系统）从不经过 Lua。
+    --   实测：不做这一步时，造出的副本玩家 IsAlive=false、Diplomacy=nil，
+    --   点下一回合 AI 处理时**原生崩溃**。
+    if C6FW ~= nil and C6FW.ActivatePlayer ~= nil then
+        local okA, rA = pcall(C6FW.ActivatePlayer, iVictim);
+        print("[CSF] copy: DLL 激活 ok=" .. tostring(okA) .. " 返回=" .. tostring(rA));
+        pcall(function() pm:SetPlayerSlotStatus(iVictim, CSF_SLOT_AI) end);
+        if C6FW.SetAlive ~= nil then
+            local okS, rS = pcall(C6FW.SetAlive, iVictim, 1);
+            print("[CSF] copy: SetAlive ok=" .. tostring(okS) .. " 返回=" .. tostring(rS));
+        end
+    else
+        print("[CSF] ⛔ copy: C6FW.ActivatePlayer 不可用 —— 拒绝造副本。");
+        print("[CSF]    原因：只设文明/领袖而不做完整激活，点下一回合会崩游戏。");
+        return false, "no_dll";
+    end
 
     -- ⑤ 复查：文明 / 领袖 / 等级 三项都要对
     local sGotCiv = CSF_Safe(function()
