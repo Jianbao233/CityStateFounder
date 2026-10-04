@@ -107,16 +107,46 @@ function CSF_ApplyCityStateColor(iSlot)
     local sCiv = nil;
     pcall(function() sCiv = PlayerConfigurations[iSlot]:GetCivilizationTypeName() end);
 
+    -- ⚠️⚠️ 2026-10-04 修正：GetColor() 在"没颜色"时返回的是 **-1**（不是 nil、不是 0）！
+    --   原代码只判 nil/0 → 于是拿着 -1 去 SetPlayerColor → 等于没补色。
+    --   实测：激活后的城邦 GetColor() = -1；引擎创建的城邦有真实值。
+    local function hasColor(v)
+        return v ~= nil and v ~= 0 and v ~= -1 and v ~= 4294967295;
+    end
+
     local iColor = nil;
-    -- ① PlayerConfigurations:GetColor()（若引擎已给过值）
     pcall(function() iColor = PlayerConfigurations[iSlot]:GetColor() end);
-    -- ② 按文明取（城邦走这条）
-    if (iColor == nil or iColor == 0) and sCiv ~= nil and UI ~= nil
+
+    -- ① 按【文明】取（城邦颜色是按文明定义的 —— 我们补了 PlayerColors 表，走这条）
+    if not hasColor(iColor) and sCiv ~= nil and UI ~= nil
        and UI.GetPlayerColorValues ~= nil then
         local ok, iBack = pcall(function() return UI.GetPlayerColorValues(sCiv, 0) end);
-        if ok and iBack ~= nil and iBack ~= 0 then iColor = iBack end;
+        if ok and hasColor(iBack) then
+            iColor = iBack;
+            print("[CSF] 补色：按文明取到 " .. tostring(iColor) .. "（" .. tostring(sCiv) .. "）");
+        end
     end
-    if iColor == nil or iColor == 0 then
+
+    -- ② 兜底：抄【场上任意一个已有颜色的城邦】
+    --    为什么需要：万一 ① 取不到（UI 表在 GameCore 上下文里有时不可用），
+    --    至少让旗标有个合法颜色 —— 没颜色的旗标在交互时会崩（见 CityBannerManager）。
+    if not hasColor(iColor) then
+        for j = 0, 63 do
+            if j ~= iSlot then
+                local c2, lvl = nil, nil;
+                pcall(function() c2 = PlayerConfigurations[j]:GetColor() end);
+                pcall(function() lvl = PlayerConfigurations[j]:GetCivilizationLevelTypeName() end);
+                if lvl == "CIVILIZATION_LEVEL_CITY_STATE" and hasColor(c2) then
+                    iColor = c2;
+                    print("[CSF] 补色：抄同场城邦 slot " .. tostring(j)
+                          .. " 的颜色 " .. tostring(iColor));
+                    break;
+                end
+            end
+        end
+    end
+
+    if not hasColor(iColor) then
         print("[CSF] 补色：取不到颜色值（" .. tostring(sCiv) .. "）");
         return false;
     end
