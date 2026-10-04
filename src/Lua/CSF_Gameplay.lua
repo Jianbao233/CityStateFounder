@@ -263,6 +263,98 @@ local function CSF_IsValidFoundLocation(iX, iY, iFounderOwner)
 end
 
 -- ---------------------------------------------------------------------------
+-- ④b ⭐⭐ 全地图找一个可建邦的地块（**逐级放宽**）
+--
+--   为什么需要（2026-10-04 实测的真实可用性问题）：
+--     在地图拥挤的局面里，调用方自己按"地图中央 + 固定距离"搜索会**一格都找不到**，
+--     玩家点「建立城邦」就得到"找不到地"。实测日志：
+--         选中 CIVILIZATION_ANTANANARIVO / 目标格 (-1,-1) / ❌ 找不到地
+--     当时场上有 9 个城邦各自派了移民（虽然 cities 仍是 0），把"看起来空"的格子占掉了。
+--
+--   策略（从最理想逐级放宽，任何一级成功就返回）：
+--     第 1 轮：全地图 + 模组的完整校验（含最小间距）
+--     第 2 轮：允许离城市更近（把 CSF_MIN_CITY_DISTANCE 临时降到 2）
+--     第 3 轮：连"有主领土"也允许（临时打开 CSF_ALLOW_OWN_TERRITORY）
+--     第 4 轮：只要不是水、不是山、不是地图边缘即可（最后兜底）
+--
+--   ⚠️ 全程 pcall 包住：任何一步失败只是少一个候选，不会中断搜索。
+--
+-- @param iFounderOwner  建邦者的玩家 ID（用于领土判断；可为 nil）
+-- @return iX, iY, sWhy  —— 失败时返回 -1, -1, 最后一次的拒绝原因
+-- ---------------------------------------------------------------------------
+local function CSF_FindFoundLocation(iFounderOwner)
+    local iW, iH = CSF_Safe(function() return Map.GetGridSize() end);
+    if iW == nil or iH == nil then return -1, -1, "no_map" end;
+
+    -- 记住原值，搜完恢复（这两个是 local 常量表外的可变开关）
+    local iOldDist  = CSF_MIN_CITY_DISTANCE;
+    local bOldOwned = CSF_ALLOW_OWN_TERRITORY;
+
+    local sLastWhy = "none";
+    local tRounds = {
+        { dist = iOldDist, owned = bOldOwned, strict = true  },   -- 第 1 轮：完整校验
+        { dist = 2,        owned = bOldOwned, strict = true  },   -- 第 2 轮：放宽间距
+        { dist = 1,        owned = true,      strict = true  },   -- 第 3 轮：允许有主领土
+        { dist = 1,        owned = true,      strict = false },   -- 第 4 轮：只查地形
+    };
+
+    for iRound, kR in ipairs(tRounds) do
+        CSF_MIN_CITY_DISTANCE   = kR.dist;
+        CSF_ALLOW_OWN_TERRITORY = kR.owned;
+        local iFoundX, iFoundY = -1, -1;
+        pcall(function()
+            -- ★ 遍历【整张地图】（不再限制在中央区域）
+            for y = 2, iH - 3 do
+                for x = 2, iW - 3 do
+                    local pPlot = Map.GetPlot(x, y);
+                    if pPlot ~= nil then
+                        local bWater = false;
+                        local bMtn   = false;
+                        pcall(function() bWater = pPlot:IsWater() end);
+                        pcall(function() bMtn   = pPlot:IsMountain() end);
+                        if bWater == false and bMtn == false then
+                            if kR.strict then
+                                local bOk, sWhy = CSF_IsValidFoundLocation(x, y, iFounderOwner);
+                                if bOk == true then iFoundX, iFoundY = x, y; return end;
+                                sLastWhy = tostring(sWhy);
+                            else
+                                -- 兜底轮：只要求"有相邻陆地"
+                                local iLand = 0;
+                                for _, kOff in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
+                                    local pN = Map.GetPlot(x + kOff[1], y + kOff[2]);
+                                    if pN ~= nil then
+                                        local bN = true;
+                                        pcall(function() bN = pN:IsWater() end);
+                                        if bN == false then iLand = iLand + 1 end;
+                                    end
+                                end
+                                if iLand >= 1 then iFoundX, iFoundY = x, y; return end;
+                            end
+                        end
+                    end
+                end
+            end
+        end);
+        if iFoundX > 0 then
+            -- 恢复开关
+            CSF_MIN_CITY_DISTANCE   = iOldDist;
+            CSF_ALLOW_OWN_TERRITORY = bOldOwned;
+            print("[CSF] 找地成功：(" .. iFoundX .. "," .. iFoundY .. ") 第 "
+                  .. iRound .. " 轮（间距=" .. kR.dist
+                  .. " 允许有主=" .. tostring(kR.owned)
+                  .. " 严格校验=" .. tostring(kR.strict) .. "）");
+            return iFoundX, iFoundY, "ok";
+        end
+    end
+
+    -- 恢复开关
+    CSF_MIN_CITY_DISTANCE   = iOldDist;
+    CSF_ALLOW_OWN_TERRITORY = bOldOwned;
+    print("[CSF] ❌ 全地图四轮搜索都没找到可建邦的地（最后原因：" .. sLastWhy .. "）");
+    return -1, -1, sLastWhy;
+end
+
+-- ---------------------------------------------------------------------------
 -- ④ 删掉某玩家的【地图外】单位
 --    地图外单位的坐标是 (-9999,-9999)（引擎哨兵值，实测确认）
 --
@@ -1937,6 +2029,8 @@ end);
 ExposedMembers.CSF = ExposedMembers.CSF or {};
 ExposedMembers.CSF.FoundCityState      = CSF_FoundCityState;
 ExposedMembers.CSF.IsValidLocation     = CSF_IsValidFoundLocation;
+-- ⭐ 全地图逐级放宽的地块查找器（地图拥挤时用得上）
+ExposedMembers.CSF.FindFoundLocation   = CSF_FindFoundLocation;
 ExposedMembers.CSF.GetPool             = CSF_GetCityStatePool;
 ExposedMembers.CSF.GetDormantCityStates = CSF_GetDormantCityStates;
 ExposedMembers.CSF.ForceReserve        = CSF_ForceReserve;
