@@ -300,6 +300,45 @@ local function CSF_FindFoundLocation(iFounderOwner)
     local iW, iH = CSF_Safe2(function() return Map.GetGridSize() end);  -- ★ 必须用 Safe2，Safe 只返回一个值
     if iW == nil or iH == nil then return -1, -1, "no_map" end;
 
+    -- ★★★ 2026-10-05 关键修复：**收集所有存活玩家的单位所在格**
+    --
+    --   实测崩溃（用户复现）：连续两次调用本函数都返回 (43,2)，
+    --   于是【两个移民叠在同一格】→ 引擎崩溃（无转储、无 WER 事件）。
+    --
+    --   根因：`CSF_IsValidFoundLocation` 的距离检查只统计**城市**
+    --   （`GetCities():Members()`）—— 而刚放下的移民**还不是城市**，
+    --   所以第二次查找完全看不到它，当然又选中同一格。
+    --
+    --   修法：把【所有存活玩家（含城邦）的每个单位所在格】记进一张表，
+    --   查找时直接跳过。用 "x*1000+y" 做键（地图宽 < 1000 足够）。
+    local tUnitPlots = {};
+    local function collectUnits(tIDs)
+        CSF_Safe(function()
+            for _, iPlayer in ipairs(tIDs) do
+                local pP = Players[iPlayer];
+                if pP ~= nil then
+                    local pUnits = CSF_Safe(function() return pP:GetUnits() end);
+                    if pUnits ~= nil then
+                        pcall(function()
+                            for _, pUnit in pUnits:Members() do
+                                local ux = CSF_Safe(function() return pUnit:GetX() end);
+                                local uy = CSF_Safe(function() return pUnit:GetY() end);
+                                if ux ~= nil and uy ~= nil and ux >= 0 and uy >= 0 then
+                                    tUnitPlots[ux * 1000 + uy] = true;
+                                end
+                            end
+                        end);
+                    end
+                end
+            end
+        end);
+    end
+    collectUnits(PlayerManager.GetAliveMajorIDs());
+    collectUnits(PlayerManager.GetAliveMinorIDs());
+    local nUnitPlots = 0;
+    for _ in pairs(tUnitPlots) do nUnitPlots = nUnitPlots + 1 end;
+    print("[CSF] 找地：已避开 " .. nUnitPlots .. " 个【有单位的】格子");
+
     -- 记住原值，搜完恢复（这两个是 local 常量表外的可变开关）
     local iOldDist  = CSF_MIN_CITY_DISTANCE;
     local bOldOwned = CSF_ALLOW_OWN_TERRITORY;
@@ -321,7 +360,7 @@ local function CSF_FindFoundLocation(iFounderOwner)
             for y = 2, iH - 3 do
                 for x = 2, iW - 3 do
                     local pPlot = Map.GetPlot(x, y);
-                    if pPlot ~= nil then
+                    if pPlot ~= nil and tUnitPlots[x * 1000 + y] ~= true then   -- ★ 跳过有单位的格
                         local bWater = false;
                         local bMtn   = false;
                         pcall(function() bWater = pPlot:IsWater() end);
