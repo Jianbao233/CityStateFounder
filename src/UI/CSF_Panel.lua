@@ -454,16 +454,42 @@ function CSF_Initialize()
         end);
     end);
 
-    -- ESC 关闭
+    -- ESC 关闭  +  Ctrl+E 打开
+    --
+    -- ⭐⭐ 2026-10-05 新增热键（Ctrl+E）。
+    --
+    --   为什么加：本 mod 原来**唯一**的面板入口是「建邦使节」单位上的动作，
+    --   而那个动作**必须替换 UnitPanel 上下文**才能注入（官方钩子
+    --   LateCheckActionBeforeAdd 只能改既有动作，不能凭空新增）。
+    --
+    --   问题：`CCB经典版` **也替换了 UnitPanel**（LoadOrder 19999，我们 500000）
+    --   → ReplaceUIScript 是独占的 → **我们覆盖了它，它的 UnitPanel 功能失效**。
+    --
+    --   而热键走的是**本面板自己的输入处理器**（InGame 上下文），
+    --   **完全不碰 UnitPanel** → **与经典版零冲突**。
+    --
+    --   注意：热键只是**多一个入口**，使节单位与它的动作都保留不变。
     ContextPtr:SetInputHandler(function(kInputStruct)
         if kInputStruct.keyCode == Keys.VK_ESCAPE and not Controls.CSFRoot:IsHidden() then
             CSF_Close();
             return true;
         end
+        -- Ctrl+E：打开/关闭面板
+        if kInputStruct.keyCode == Keys.VK_E
+           and (kInputStruct.controlDown == true or kInputStruct.ctrlDown == true) then
+            if Controls.CSFRoot:IsHidden() then
+                print("[CSF] 热键 Ctrl+E：打开面板");
+                CSF_Open();
+            else
+                print("[CSF] 热键 Ctrl+E：关闭面板");
+                CSF_Close();
+            end
+            return true;
+        end
         return false;
     end, true);
 
-    print("[CSF] CSF_Panel initialized");
+    print("[CSF] CSF_Panel initialized（面板入口：建邦使节动作 / 热键 Ctrl+E）");
 end
 
 ContextPtr:SetInitHandler(CSF_Initialize);
