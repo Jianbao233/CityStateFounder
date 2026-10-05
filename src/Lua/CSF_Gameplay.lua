@@ -1960,34 +1960,43 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     end
                 end
                 if bSafe then
-                    -- 单位检查：半径 2 内任何玩家的单位都算危险（内联扫，不用别的函数的局部表）
-                    local function nearAnyUnit(tIDs)
+                    -- 单位检查：**只查目标格本身**，且**排除建邦者自己的单位**。
+                    --
+                    --   ⚠️⚠️ 2026-10-06 修正（用户实测：面板报 `unsafe_plot`）：
+                    --   原来查"半径 2 内任何玩家的单位" → 把**建邦使节自己**也算进去了
+                    --   （使节就在旁边，玩家选的格必然离它不远）→ **永远拒绝**。
+                    --   而且现在用的是 `Cities:Create`（**不产生单位**），
+                    --   半径检查是为 `InitUnit` 防挂起加的，**已经没有意义**。
+                    local bOccupied = false;
+                    local function checkPlotOccupied(tIDs)
                         CSF_Safe(function()
                             for _, iPlayer in ipairs(tIDs) do
-                                local pP = Players[iPlayer];
-                                if pP ~= nil then
-                                    local pUnits = CSF_Safe(function() return pP:GetUnits() end);
-                                    if pUnits ~= nil then
-                                        pcall(function()
-                                            for _, pUnit in pUnits:Members() do
-                                                local ux = CSF_Safe(function() return pUnit:GetX() end);
-                                                local uy = CSF_Safe(function() return pUnit:GetY() end);
-                                                if ux ~= nil and uy ~= nil
-                                                   and math.abs(ux - iX) <= 2
-                                                   and math.abs(uy - iY) <= 2 then
-                                                    bSafe = false;
+                                -- ★ 跳过建邦者自己（iFounderOwner 或本地玩家）
+                                if iPlayer ~= iFounderOwner then
+                                    local pP = Players[iPlayer];
+                                    if pP ~= nil then
+                                        local pUnits = CSF_Safe(function() return pP:GetUnits() end);
+                                        if pUnits ~= nil then
+                                            pcall(function()
+                                                for _, pUnit in pUnits:Members() do
+                                                    local ux = CSF_Safe(function() return pUnit:GetX() end);
+                                                    local uy = CSF_Safe(function() return pUnit:GetY() end);
+                                                    if ux == iX and uy == iY then
+                                                        bOccupied = true;
+                                                    end
                                                 end
-                                            end
-                                        end);
+                                            end);
+                                        end
                                     end
                                 end
                             end
                         end);
                     end
-                    nearAnyUnit(PlayerManager.GetAliveMajorIDs());
-                    nearAnyUnit(PlayerManager.GetAliveMinorIDs());
-                    if not bSafe then
-                        print("[CSF] slot-activate: ⛔ 地块半径 2 内有单位，拒绝放移民（防挂起）");
+                    checkPlotOccupied(PlayerManager.GetAliveMajorIDs());
+                    checkPlotOccupied(PlayerManager.GetAliveMinorIDs());
+                    if bOccupied then
+                        bSafe = false;
+                        print("[CSF] slot-activate: ⛔ 目标格上有别的玩家的单位，拒绝建城");
                     end
                 end
                 if not bSafe then
