@@ -232,6 +232,21 @@ local function CSF_IsValidFoundLocation(iX, iY, iFounderOwner)
         return false, "too_little_land";
     end
 
+    -- ⭐ 2026-10-06 用户要求：**加"山脉/冰盖"检查**
+    local bMtn = false;
+    pcall(function() bMtn = pPlot:IsMountain() end);
+    if bMtn == true then
+        return false, "mountain";
+    end
+    local iFeat = CSF_Safe(function() return pPlot:GetFeatureType() end);
+    if iFeat ~= nil and iFeat >= 0 then
+        -- FEATURE_ICE 的哈希：查 GameInfo
+        local sFeat = CSF_Safe(function() return GameInfo.Features[iFeat].FeatureType end);
+        if sFeat == "FEATURE_ICE" then
+            return false, "ice";
+        end
+    end
+
     -- 领土：无主地永远允许；有主地取决于 CSF_ALLOW_OWN_TERRITORY
     --   ⚠️ 实测（T-97）：`Create` 作用在【有主地块】上会导致游戏崩溃。
     --      所以默认【拒绝一切有主地块】，这是唯一"保证不崩"的策略。
