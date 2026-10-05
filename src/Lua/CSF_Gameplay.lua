@@ -332,6 +332,13 @@ local function CSF_FindFoundLocation(iFounderOwner)
     --
     --   修法：把【所有存活玩家（含城邦）的每个单位所在格】记进一张表，
     --   查找时直接跳过。用 "x*1000+y" 做键（地图宽 < 1000 足够）。
+    --
+    --   ⚠️⚠️ 2026-10-06 追加：**不只是跳过单位所在格，还要避开它周围一圈**。
+    --   实测（用户/模拟点击）：
+    --     · 移民放在**贴地图边缘**（(5,3)、(27,2)、(34,4)）→ InitUnit 成功，但**建不了城**
+    --     · 移民放在**地图正中心 (36,26)**（人类玩家所在地）→ **InitUnit 直接挂起游戏**
+    --   所以：既要离边缘够远（能建城），又要离所有单位够远（不挂起）。
+    --   这里把"单位所在格及其 8 邻格"都标为禁区（半径 1），再叠加上面的边缘留白。
     local tUnitPlots = {};
     local function collectUnits(tIDs)
         CSF_Safe(function()
@@ -345,7 +352,14 @@ local function CSF_FindFoundLocation(iFounderOwner)
                                 local ux = CSF_Safe(function() return pUnit:GetX() end);
                                 local uy = CSF_Safe(function() return pUnit:GetY() end);
                                 if ux ~= nil and uy ~= nil and ux >= 0 and uy >= 0 then
-                                    tUnitPlots[ux * 1000 + uy] = true;
+                                    -- ★ 单位所在格 + 周围两圈（切比雪夫半径 2）
+                                    --   半径 1 实测不够：人类玩家开局有多个单位 + 城市，
+                                    --   移民落在它们中间仍会让 InitUnit 挂起。
+                                    for ddy = -2, 2 do
+                                        for ddx = -2, 2 do
+                                            tUnitPlots[(ux + ddx) * 1000 + (uy + ddy)] = true;
+                                        end
+                                    end
                                 end
                             end
                         end);
@@ -1913,6 +1927,47 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 if m_tReserved[iSlot] then
                     m_tReserved[iSlot] = nil;
                     print("[CSF] slot-activate: 解除槽 " .. tostring(iSlot) .. " 的预留标记");
+                end
+
+                -- ★★★ 放移民前的最后一道强校验（防挂起）
+                --
+                --   实测：InitUnit 在地图正中心（人类玩家单位密集处）会**挂起游戏**
+                --   （无弹窗、无事件日志，Tuner 拒绝连接）。所以放之前再确认：
+                --     ① 地块无主（GetOwner == -1）
+                --     ② 地块上没有城市
+                --     ③ 半径 2 内没有任何单位的格子（用上面收集的表查）
+                local bSafe = true;
+                local pChk = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
+                if pChk == nil then bSafe = false end;
+                if bSafe then
+                    local iOwn = CSF_Safe(function() return pChk:GetOwner() end);
+                    if iOwn ~= nil and iOwn ~= -1 then
+                        bSafe = false;
+                        print("[CSF] slot-activate: ⛔ 地块 (" .. tostring(iX) .. "," .. tostring(iY) ..
+                              ") 有主（" .. tostring(iOwn) .. "），拒绝放移民");
+                    end
+                end
+                if bSafe then
+                    local pCity = CSF_Safe(function() return pChk:GetCity() end);
+                    if pCity ~= nil then
+                        bSafe = false;
+                        print("[CSF] slot-activate: ⛔ 地块上有城市，拒绝放移民");
+                    end
+                end
+                if bSafe then
+                    for ddy = -2, 2 do
+                        for ddx = -2, 2 do
+                            if tUnitPlots[(iX + ddx) * 1000 + (iY + ddy)] == true then
+                                bSafe = false;
+                            end
+                        end
+                    end
+                    if not bSafe then
+                        print("[CSF] slot-activate: ⛔ 地块半径 2 内有单位，拒绝放移民（防挂起）");
+                    end
+                end
+                if not bSafe then
+                    return false, "unsafe_plot", iSlot;
                 end
 
                 local bUnit = pcall(function()
