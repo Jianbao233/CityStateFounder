@@ -1944,11 +1944,19 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 local pChk = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
                 if pChk == nil then bSafe = false end;
                 if bSafe then
+                    -- ⚠️⚠️ 2026-10-06 修正（用户实测：在自己领土上点建造 → unsafe_plot）：
+                    --   面板用的坐标是【建邦使节所在格】，而使节通常站在**建邦者自己的领土**里
+                    --   → 原来"有主就拒绝"把这种情况也挡了 → 永远失败。
+                    --
+                    --   实测结论：**建邦者自己的领土可以建**（仍是合法城址）；
+                    --   崩的是【别人的】领土（引擎在别人的地里塞一个城邦 → 踩空）。
                     local iOwn = CSF_Safe(function() return pChk:GetOwner() end);
-                    if iOwn ~= nil and iOwn ~= -1 then
+                    if iOwn ~= nil and iOwn ~= -1 and iOwn ~= iFounderOwner then
                         bSafe = false;
                         print("[CSF] slot-activate: ⛔ 地块 (" .. tostring(iX) .. "," .. tostring(iY) ..
-                              ") 有主（" .. tostring(iOwn) .. "），拒绝放移民");
+                              ") 属于别的玩家（" .. tostring(iOwn) .. "），拒绝建城");
+                    elseif iOwn ~= nil and iOwn ~= -1 then
+                        print("[CSF] slot-activate: 地块属于建邦者自己（" .. tostring(iOwn) .. "），允许");
                     end
                 end
                 if bSafe then
