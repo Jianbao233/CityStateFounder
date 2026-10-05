@@ -1,19 +1,12 @@
-print("=== InGame 上下文里找结束回合 ===")
-for _, n in ipairs({ "DoEndTurn", "EndTurn", "OnEndTurn", "RequestEndTurn", "OnNextTurn" }) do
-  local v = nil
-  pcall(function() v = _G[n] end)
-  print(string.format("  _G[%-18s] = %s", n, type(v)))
+local function try(f)
+  local ok, v = pcall(f)
+  if not ok then return "ERR(" .. tostring(v):sub(1,60) .. ")" end
+  if v == nil then return "nil" end
+  return tostring(v)
 end
-print("  UI.DoEndTurn = " .. type(UI and UI.DoEndTurn))
-print("  UI.EndTurn   = " .. type(UI and UI.EndTurn))
-print("  GameCore_Tuner 不可用则忽略")
--- 尝试
-if UI ~= nil and UI.DoEndTurn ~= nil then
-  local ok, err = pcall(function() UI.DoEndTurn() end)
-  print("  UI.DoEndTurn() ok=" .. tostring(ok) .. " err=" .. tostring(err))
-elseif _G.DoEndTurn ~= nil then
-  local ok, err = pcall(_G.DoEndTurn)
-  print("  DoEndTurn() ok=" .. tostring(ok) .. " err=" .. tostring(err))
-else
-  print("  ⚠️ 本上下文没有结束回合函数")
-end
+print("  UI.CanEndTurn()   = " .. try(function() return UI.CanEndTurn() end))
+print("  UI.HasSentTurnComplete() = " .. try(function() return UI.HasSentTurnComplete() end))
+print("  ActionTypes       = " .. try(function() return type(ActionTypes) end))
+print("  准备调用 UI.RequestAction(1)  —— 若 ACTION_ENDTURN=1 则结束回合")
+local ok, r = pcall(function() return UI.RequestAction(1) end)
+print("  UI.RequestAction(1) ok=" .. tostring(ok) .. " 返回=" .. tostring(r))
