@@ -207,6 +207,18 @@
       </Items>
     </ImportFiles>
 
+    <!-- ⭐⭐⭐ 2026-10-06 恢复：建邦使节的动作按钮（用户明确要求）
+         用户原话："不要用快捷键，直接用之前的建立按钮，冲突什么的之后再说"
+         → 恢复 UnitPanel 替换。与 CCB经典版 的冲突（两边都替换 UnitPanel，
+           组件后应用者赢 = 我们赢）暂时搁置，之后再解决。 -->
+    <ReplaceUIScript id="CSF_REPLACE_UNITPANEL">
+      <Properties>
+        <LoadOrder>500000</LoadOrder>
+        <LuaContext>UnitPanel</LuaContext>
+        <LuaReplace>UI/CSF_UnitPanel.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+
     <!-- ⛔⛔⛔ 2026-10-05：**UnitPanel 替换已【移除】**
          原因：CCB经典版 也替换 UnitPanel（`ui/replacements/unitpanel_bbg.lua`）。
                ReplaceUIScript 的胜负由【组件应用顺序】决定（后应用的赢），
