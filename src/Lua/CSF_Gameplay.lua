@@ -1858,7 +1858,17 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
         if iSlot ~= nil then
             print("[CSF] slot-activate: " .. tostring(sCiv) ..
                   " 有未激活的预注册槽 " .. tostring(iSlot) .. " → 激活它");
-            local bAct = CSF_ActivateCityStateSlot(iSlot);
+            -- ⚠️ 必须走 ExposedMembers 跨文件调用！
+            --    `CSF_ActivateCityStateSlot` 是 CSF_CreateCityState.lua 里的**局部函数**，
+            --    在本文件里是 nil —— 直接调会抛异常（实测：reason=threw）。
+            --    导出名是 ExposedMembers.CSF.ActivateCityState。
+            local fAct = (ExposedMembers ~= nil and ExposedMembers.CSF ~= nil)
+                          and ExposedMembers.CSF.ActivateCityState or nil;
+            if fAct == nil then
+                print("[CSF] slot-activate: ❌ ExposedMembers.CSF.ActivateCityState 不可用");
+                return false, "no_activate_fn";
+            end
+            local bAct = fAct(iSlot);
             if bAct == true then
                 print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活成功，放移民");
                 local bOkS, sReasonS = CSF_FoundCityState(iSlot, iX, iY, iUnitID, iOwnerID);
