@@ -1951,7 +1951,7 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     --   实测结论：**建邦者自己的领土可以建**（仍是合法城址）；
                     --   崩的是【别人的】领土（引擎在别人的地里塞一个城邦 → 踩空）。
                     local iOwn = CSF_Safe(function() return pChk:GetOwner() end);
-                    if iOwn ~= nil and iOwn ~= -1 and iOwn ~= iFounderOwner then
+                    local iMine = iOwnerID; if iMine == nil then pcall(function() iMine = Game.GetLocalPlayer() end) end; if iOwn ~= nil and iOwn ~= -1 and iOwn ~= iMine then
                         bSafe = false;
                         print("[CSF] slot-activate: ⛔ 地块 (" .. tostring(iX) .. "," .. tostring(iY) ..
                               ") 属于别的玩家（" .. tostring(iOwn) .. "），拒绝建城");
@@ -1980,7 +1980,7 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                         CSF_Safe(function()
                             for _, iPlayer in ipairs(tIDs) do
                                 -- ★ 跳过建邦者自己（iFounderOwner 或本地玩家）
-                                if iPlayer ~= iFounderOwner then
+                                if iPlayer ~= iMine then
                                     local pP = Players[iPlayer];
                                     if pP ~= nil then
                                         local pUnits = CSF_Safe(function() return pP:GetUnits() end);
