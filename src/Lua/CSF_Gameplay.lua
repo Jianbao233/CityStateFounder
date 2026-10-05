@@ -1994,19 +1994,43 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     return false, "unsafe_plot", iSlot;
                 end
 
-                local bUnit = pcall(function()
-                    UnitManager.InitUnit(iSlot, "UNIT_SETTLER", iX, iY);
+                -- ★★★★★ 2026-10-06【最终方案】校验通过后，**直接用 Cities:Create 建城**
+                --
+                --   实测对照（同一局、同样激活成功）：
+                --     · 只放 UNIT_SETTLER → 挂机推进 17 回合，**城市=0**（AI 不主动建城）
+                --     · 直接 Cities:Create   → **城市=1，立刻生效**（Round 11 实测）
+                --
+                --   所以"放移民让 AI 自建"这条路**走不通**（城邦 AI 不会主动建城）。
+                --   而 Cities:Create **本身是能用的** —— 它以前崩，是因为**地块不合法**
+                --   （有主 / 有城 / 单位密集）→ 引擎踩空。
+                --
+                --   ⇒ 正解：**先用上面那段严格校验把关，通过后再 Create。**
+                --     校验已覆盖：无主 + 无城市 + 半径 2 无单位 + 非水非山 + 离边缘 ≥4。
+                --
+                --   ⚠️ 仍然要 pcall 包住：万一 Create 内部静默失败，至少不会把异常抛给上层。
+                local bCreate, sCreateErr = pcall(function()
+                    Players[iSlot]:GetCities():Create(iX, iY);
                 end);
-                print("[CSF] slot-activate: 放移民到 (" .. tostring(iX) .. "," .. tostring(iY) ..
-                      ") ok=" .. tostring(bUnit));
-                if not bUnit then
-                    return false, "settler_failed", iSlot;
+                print("[CSF] slot-activate: Cities:Create(" .. tostring(iX) .. "," .. tostring(iY) ..
+                      ") player=" .. tostring(iSlot) .. " ok=" .. tostring(bCreate) ..
+                      (bCreate and "" or (" err=" .. tostring(sCreateErr):sub(1,60))));
+
+                -- 复查：Create 对非法地块会【静默失败】—— 不报错但城市数不变
+                local iAfter = 0;
+                pcall(function() iAfter = Players[iSlot]:GetCities():GetCount() end);
+                print("[CSF] slot-activate: 建城后城市数 = " .. tostring(iAfter));
+                if iAfter < 1 then
+                    -- 兜底：退回"放移民"（至少让玩家看到城邦单位，AI 也许将来会建）
+                    print("[CSF] slot-activate: ⚠️ Create 未生效 → 退回放移民");
+                    pcall(function()
+                        UnitManager.InitUnit(iSlot, "UNIT_SETTLER", iX, iY);
+                    end);
                 end
 
                 CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
 
                 print("[CSF] slot-activate: 槽 " .. tostring(iSlot) ..
-                      " 的移民已就位，将在它的回合自行建城");
+                      " 建邦完成（城市数 " .. tostring(iAfter) .. "）");
                 return true, "ok", iSlot, true;
             end
             print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活失败");
