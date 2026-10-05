@@ -377,32 +377,57 @@ local function CSF_FindFoundLocation(iFounderOwner)
         CSF_ALLOW_OWN_TERRITORY = kR.owned;
         local iFoundX, iFoundY = -1, -1;
         pcall(function()
-            -- ★ 遍历【整张地图】（不再限制在中央区域）
-            for y = 2, iH - 3 do
-                for x = 2, iW - 3 do
-                    local pPlot = Map.GetPlot(x, y);
-                    if pPlot ~= nil and tUnitPlots[x * 1000 + y] ~= true then   -- ★ 跳过有单位的格
-                        local bWater = false;
-                        local bMtn   = false;
-                        pcall(function() bWater = pPlot:IsWater() end);
-                        pcall(function() bMtn   = pPlot:IsMountain() end);
-                        if bWater == false and bMtn == false then
-                            if kR.strict then
-                                local bOk, sWhy = CSF_IsValidFoundLocation(x, y, iFounderOwner);
-                                if bOk == true then iFoundX, iFoundY = x, y; return end;
-                                sLastWhy = tostring(sWhy);
-                            else
-                                -- 兜底轮：只要求"有相邻陆地"
-                                local iLand = 0;
-                                for _, kOff in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
-                                    local pN = Map.GetPlot(x + kOff[1], y + kOff[2]);
-                                    if pN ~= nil then
-                                        local bN = true;
-                                        pcall(function() bN = pN:IsWater() end);
-                                        if bN == false then iLand = iLand + 1 end;
+            -- ★ 遍历整张地图，但**从地图中心向外**扫，并要求**离边缘至少 4 格**。
+            --
+            --   ⚠️⚠️ 2026-10-06 关键修正（用户实测：激活的城邦 19 回合不建城）：
+            --   原来从 (2,2) 开始扫 → 第一个合法格永远是**贴地图边缘**的（实测拿到
+            --   (2,2)、(5,3)、(8,2)、(27,2)）→ 移民站在那里**建不了城**：
+            --   引擎建城需要周围有足够空间，贴边格不行。
+            --   实测对照：引擎自己激活的槽 6/7/8 也卡在边缘、也不建城；而槽 9~14
+            --   位置在内部、全部建城成功 → 说明**位置是决定因素**。
+            --
+            --   修法：① 边缘留 4 格；② 从中心向外螺旋，优先选内部格。
+            local iCx = math.floor(iW / 2);
+            local iCy = math.floor(iH / 2);
+            local iMargin = 4;
+            local iMaxR = math.max(iCx, iCy) + 2;
+            local bDone = false;
+            for iR = 0, iMaxR do
+                if bDone then break end
+                for dy = -iR, iR do
+                    if bDone then break end
+                    for dx = -iR, iR do
+                        -- 只扫这一圈的边界（切比雪夫环）
+                        if iR == 0 or math.abs(dx) == iR or math.abs(dy) == iR then
+                            local x = iCx + dx;
+                            local y = iCy + dy;
+                            if x >= iMargin and x <= iW - 1 - iMargin
+                               and y >= iMargin and y <= iH - 1 - iMargin then
+                                local pPlot = Map.GetPlot(x, y);
+                                if pPlot ~= nil and tUnitPlots[x * 1000 + y] ~= true then
+                                    local bWater = false;
+                                    local bMtn   = false;
+                                    pcall(function() bWater = pPlot:IsWater() end);
+                                    pcall(function() bMtn   = pPlot:IsMountain() end);
+                                    if bWater == false and bMtn == false then
+                                        if kR.strict then
+                                            local bOk, sWhy = CSF_IsValidFoundLocation(x, y, iFounderOwner);
+                                            if bOk == true then iFoundX, iFoundY = x, y; bDone = true; break end;
+                                            sLastWhy = tostring(sWhy);
+                                        else
+                                            local iLand = 0;
+                                            for _, kOff in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
+                                                local pN = Map.GetPlot(x + kOff[1], y + kOff[2]);
+                                                if pN ~= nil then
+                                                    local bN = true;
+                                                    pcall(function() bN = pN:IsWater() end);
+                                                    if bN == false then iLand = iLand + 1 end;
+                                                end
+                                            end
+                                            if iLand >= 1 then iFoundX, iFoundY = x, y; bDone = true; break end;
+                                        end
                                     end
                                 end
-                                if iLand >= 1 then iFoundX, iFoundY = x, y; return end;
                             end
                         end
                     end
