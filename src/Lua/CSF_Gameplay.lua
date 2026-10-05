@@ -1929,6 +1929,52 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     print("[CSF] slot-activate: 解除槽 " .. tostring(iSlot) .. " 的预留标记");
                 end
 
+                -- ★★★★★ 2026-10-06【关键修正】把目标格换成【离它最近的无主合法格】
+                --
+                --   实测（用户场景 + 我复现）：
+                --     · `Cities:Create` 在【无主地】上**成功**（城市=1）
+                --     · 在【自己的领土】上**静默失败**（返回 ok 但城市数不变）
+                --   而面板用的坐标是【建邦使节所在格】，使节通常站在自己领土里
+                --   → 必然失败 → 用户看到"建不了"。
+                --
+                --   ⇒ 这里把 iX/iY 换成**离原目标最近的、无主的、合法的**格子。
+                --     搜索半径从 0 逐圈扩大到 6；找不到就保持原格（后面校验会拒绝）。
+                do
+                    local iBestX, iBestY = nil, nil;
+                    local p0 = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
+                    local iOwn0 = nil;
+                    if p0 ~= nil then iOwn0 = CSF_Safe(function() return p0:GetOwner() end) end;
+                    if iOwn0 ~= nil and iOwn0 ~= -1 then
+                        -- 原格有主 → 向外找无主格
+                        for iR = 1, 6 do
+                            local bFound = false;
+                            for dy = -iR, iR do
+                                if bFound then break end
+                                for dx = -iR, iR do
+                                    if iR == 0 or math.abs(dx) == iR or math.abs(dy) == iR then
+                                        local nx, ny = iX + dx, iY + dy;
+                                        local pN = CSF_Safe(function() return Map.GetPlot(nx, ny) end);
+                                        if pN ~= nil then
+                                            local oN = CSF_Safe(function() return pN:GetOwner() end);
+                                            local wN = CSF_Safe(function() return pN:IsWater() end);
+                                            local mN = CSF_Safe(function() return pN:IsMountain() end);
+                                            local cN = CSF_Safe(function() return Cities.GetCityInPlot(nx, ny) end);
+                                            if oN == -1 and wN == false and mN == false and cN == nil then
+                                                iBestX, iBestY = nx, ny; bFound = true; break;
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            if bFound then break end
+                        end
+                        if iBestX ~= nil then
+                            print("[CSF] slot-activate: 原格有主 → 改用最近的无主格 (" ..
+                                  tostring(iBestX) .. "," .. tostring(iBestY) .. ")");
+                            iX, iY = iBestX, iBestY;
+                        end
+                    end
+                end
                 -- ★★★ 放移民前的最后一道强校验（防挂起）
                 --
                 --   实测：InitUnit 在地图正中心（人类玩家单位密集处）会**挂起游戏**
@@ -2079,6 +2125,42 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             print("[CSF] un-reserved city-state " .. tostring(iReuse) .. " before settling");
         end
 
+        -- ★★★★★ 2026-10-06【同上】把目标格换成最近的无主合法格
+        do
+            local p0 = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
+            local iOwn0 = nil;
+            if p0 ~= nil then iOwn0 = CSF_Safe(function() return p0:GetOwner() end) end;
+            if iOwn0 ~= nil and iOwn0 ~= -1 then
+                local iBestX, iBestY = nil, nil;
+                for iR = 1, 6 do
+                    local bFound = false;
+                    for dy = -iR, iR do
+                        if bFound then break end
+                        for dx = -iR, iR do
+                            if math.abs(dx) == iR or math.abs(dy) == iR then
+                                local nx, ny = iX + dx, iY + dy;
+                                local pN = CSF_Safe(function() return Map.GetPlot(nx, ny) end);
+                                if pN ~= nil then
+                                    local oN = CSF_Safe(function() return pN:GetOwner() end);
+                                    local wN = CSF_Safe(function() return pN:IsWater() end);
+                                    local mN = CSF_Safe(function() return pN:IsMountain() end);
+                                    local cN = CSF_Safe(function() return Cities.GetCityInPlot(nx, ny) end);
+                                    if oN == -1 and wN == false and mN == false and cN == nil then
+                                        iBestX, iBestY = nx, ny; bFound = true; break;
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if bFound then break end
+                end
+                if iBestX ~= nil then
+                    print("[CSF] settle: 原格有主 → 改用最近的无主格 (" ..
+                          tostring(iBestX) .. "," .. tostring(iBestY) .. ")");
+                    iX, iY = iBestX, iBestY;
+                end
+            end
+        end
         -- ★★★★★ 2026-10-06【与 slot-activate 分支统一】：**校验后直接 Create**
         --
         --   原来这里只放 UNIT_SETTLER，指望城邦 AI 自己建城 —— **实测不成立**：
