@@ -1945,36 +1945,23 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     local iOwn0 = nil;
                     if p0 ~= nil then iOwn0 = CSF_Safe(function() return p0:GetOwner() end) end;
                     if iOwn0 ~= nil and iOwn0 ~= -1 then
-                        -- 原格有主 → 向外找无主格
-                        for iR = 1, 6 do
-                            local bFound = false;
-                            for dy = -iR, iR do
-                                if bFound then break end
-                                for dx = -iR, iR do
-                                    if iR == 0 or math.abs(dx) == iR or math.abs(dy) == iR then
-                                        local nx, ny = iX + dx, iY + dy;
-                                        local pN = CSF_Safe(function() return Map.GetPlot(nx, ny) end);
-                                        if pN ~= nil then
-                                            local oN = CSF_Safe(function() return pN:GetOwner() end);
-                                            local wN = CSF_Safe(function() return pN:IsWater() end);
-                                            local mN = CSF_Safe(function() return pN:IsMountain() end);
-                                            local cN = CSF_Safe(function() return Cities.GetCityInPlot(nx, ny) end);
-                                            -- ★ 必须同时通过完整校验（含城市最小间距）
-                                            local bOkN, _ = CSF_IsValidFoundLocation(nx, ny, iOwnerID);
-                                            if oN == -1 and wN == false and mN == false and cN == nil and bOkN == true then
-                                                iBestX, iBestY = nx, ny; bFound = true; break;
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                            if bFound then break end
+                        -- ⛔⛔⛔ 2026-10-06【安全第一】不再"从原格向外找" —— 那会找到
+                        --   贴边格（实测 (4,4)）→ `Cities:Create` 直接**崩**（读 0xc）。
+                        --   改用 `CSF_FindFoundLocation`：它**从地图中心向外**走切比雪夫环，
+                        --   并要求离边缘 ≥4、通过完整校验 —— Round 4 成功的地块 (28,18)
+                        --   就是它找到的。
+                        local fFind = CSF_FindFoundLocation;
+                        local bx, byY = -1, -1;
+                        if fFind ~= nil then
+                            local okF, rx, ry = pcall(fFind, iOwnerID);
+                            if okF and rx ~= nil and rx > 0 then bx, byY = rx, ry end
                         end
-                        if iBestX ~= nil then
-                            print("[CSF] slot-activate: 原格有主 → 改用最近的无主格 (" ..
-                                  tostring(iBestX) .. "," .. tostring(iBestY) .. ")");
-                            iX, iY = iBestX, iBestY;
+                        if bx > 0 then
+                            print("[CSF] slot-activate: 原格有主 → 改用合格格 (" ..
+                                  tostring(bx) .. "," .. tostring(byY) .. ")");
+                            iX, iY = bx, byY;
                         end
+                        iBestX, iBestY = bx, byY;
                     end
                 end
                 -- ★★★ 放移民前的最后一道强校验（防挂起）
@@ -2133,34 +2120,13 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             local iOwn0 = nil;
             if p0 ~= nil then iOwn0 = CSF_Safe(function() return p0:GetOwner() end) end;
             if iOwn0 ~= nil and iOwn0 ~= -1 then
-                local iBestX, iBestY = nil, nil;
-                for iR = 1, 6 do
-                    local bFound = false;
-                    for dy = -iR, iR do
-                        if bFound then break end
-                        for dx = -iR, iR do
-                            if math.abs(dx) == iR or math.abs(dy) == iR then
-                                local nx, ny = iX + dx, iY + dy;
-                                local pN = CSF_Safe(function() return Map.GetPlot(nx, ny) end);
-                                if pN ~= nil then
-                                    local oN = CSF_Safe(function() return pN:GetOwner() end);
-                                    local wN = CSF_Safe(function() return pN:IsWater() end);
-                                    local mN = CSF_Safe(function() return pN:IsMountain() end);
-                                    local cN = CSF_Safe(function() return Cities.GetCityInPlot(nx, ny) end);
-                                    local bOkN, _ = CSF_IsValidFoundLocation(nx, ny, iOwnerID);
-                                    if oN == -1 and wN == false and mN == false and cN == nil and bOkN == true then
-                                        iBestX, iBestY = nx, ny; bFound = true; break;
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    if bFound then break end
-                end
-                if iBestX ~= nil then
-                    print("[CSF] settle: 原格有主 → 改用最近的无主格 (" ..
-                          tostring(iBestX) .. "," .. tostring(iBestY) .. ")");
-                    iX, iY = iBestX, iBestY;
+                -- ⛔ 不再"从原格向外找"（会找到贴边格 → Create 崩，实测 0xc）
+                --    改用 CSF_FindFoundLocation（从地图中心向外、离边缘 ≥4、完整校验）
+                local okF, rx, ry = pcall(CSF_FindFoundLocation, iOwnerID);
+                if okF and rx ~= nil and rx > 0 then
+                    print("[CSF] settle: 原格有主 → 改用合格格 (" ..
+                          tostring(rx) .. "," .. tostring(ry) .. ")");
+                    iX, iY = rx, ry;
                 end
             end
         end
