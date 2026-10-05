@@ -1959,7 +1959,9 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                                             local wN = CSF_Safe(function() return pN:IsWater() end);
                                             local mN = CSF_Safe(function() return pN:IsMountain() end);
                                             local cN = CSF_Safe(function() return Cities.GetCityInPlot(nx, ny) end);
-                                            if oN == -1 and wN == false and mN == false and cN == nil then
+                                            -- ★ 必须同时通过完整校验（含城市最小间距）
+                                            local bOkN, _ = CSF_IsValidFoundLocation(nx, ny, iOwnerID);
+                                            if oN == -1 and wN == false and mN == false and cN == nil and bOkN == true then
                                                 iBestX, iBestY = nx, ny; bFound = true; break;
                                             end
                                         end
@@ -2145,7 +2147,8 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                                     local wN = CSF_Safe(function() return pN:IsWater() end);
                                     local mN = CSF_Safe(function() return pN:IsMountain() end);
                                     local cN = CSF_Safe(function() return Cities.GetCityInPlot(nx, ny) end);
-                                    if oN == -1 and wN == false and mN == false and cN == nil then
+                                    local bOkN, _ = CSF_IsValidFoundLocation(nx, ny, iOwnerID);
+                                    if oN == -1 and wN == false and mN == false and cN == nil and bOkN == true then
                                         iBestX, iBestY = nx, ny; bFound = true; break;
                                     end
                                 end
