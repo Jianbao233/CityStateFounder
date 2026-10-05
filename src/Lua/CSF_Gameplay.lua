@@ -1967,8 +1967,15 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                         print("[CSF] slot-activate: ⛔ 地块上有城市，拒绝放移民");
                     end
                 end
-                if bSafe then
-                    -- 单位检查：**只查目标格本身**，且**排除建邦者自己的单位**。
+                if false then
+                    -- ⛔ 单位检查已【停用】（2026-10-06 用户实测第二轮）
+                    --
+                    --   为什么停用：
+                    --     · `Cities:Create` **不产生单位** → 这个检查（原本为 `InitUnit`
+                    --       防挂起而加）**没有意义**；
+                    --     · 而且它**误伤**：实测目标格上有别人的单位时（城邦/蛮族巡逻）
+                    --       就被拒 → 用户在自己领土上也建不出来（第二次 unsafe_plot）。
+                    --   ⇒ 保留代码但停用，万一将来改回 InitUnit 路线可再启用。
                     --
                     --   ⚠️⚠️ 2026-10-06 修正（用户实测：面板报 `unsafe_plot`）：
                     --   原来查"半径 2 内任何玩家的单位" → 把**建邦使节自己**也算进去了
