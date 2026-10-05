@@ -27,12 +27,27 @@ if ($pr) {
     $ok = $false
 }
 
-# --- ② Tuner 端口（进程活着但端口拒绝 = 挂起）---
+# --- ② Tuner 端口 ---
+#
+# ⚠️ 2026-10-06 修正：**Tuner 拒绝连接不等于挂起**。
+#   实测：游戏在跑 AI 回合时（尤其有别的 mod 在刷错误拖慢它），
+#   Tuner 会暂时拒绝连接，但日志仍在持续写入 —— 那是【忙】，不是【挂起】。
+#   所以这里加一步【日志活跃度】判断：
+#     · 最近 30 秒内有日志写入 → BUSY（不判失败）
+#     · 30 秒内无写入且 Tuner 拒绝 → HUNG（判失败）
 $tuner = Test-NetConnection -ComputerName 127.0.0.1 -Port 4318 -InformationLevel Quiet -WarningAction SilentlyContinue
+$logFresh = $false
+$logAge = 999
+if (Test-Path "$la\Lua.log") {
+    $logAge = ((Get-Date) - (Get-Item "$la\Lua.log").LastWriteTime).TotalSeconds
+    if ($logAge -lt 30) { $logFresh = $true }
+}
 if ($tuner) {
     Write-Output "  Tuner 4318: OK"
+} elseif ($logFresh) {
+    Write-Output ("  Tuner 4318: BUSY（拒绝连接，但日志 {0:N0} 秒前还在写 → 正在跑 AI 回合，不是挂起）" -f $logAge)
 } else {
-    Write-Output "  Tuner 4318: [X] 拒绝连接（进程活着 = 已挂起）"
+    Write-Output ("  Tuner 4318: [X] 拒绝连接 + 日志已 {0:N0} 秒没动 → 判定【挂起】" -f $logAge)
     if ($pr) { $ok = $false }
 }
 
