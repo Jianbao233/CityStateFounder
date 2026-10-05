@@ -206,9 +206,15 @@
         <File>UI/CSF_UnitPanel.lua</File>
       </Items>
     </ImportFiles>
+    <!-- ⭐⭐⭐ 2026-10-05：LoadOrder 从 500000 降到 19000 —— 【主动让位给 CCB经典版】
+         原因：CCB经典版 也替换 UnitPanel（LoadOrder 19999），而 ReplaceUIScript 是独占的。
+               原来我们 500000 > 它 19999 → 我们赢 → 【经典版的 UnitPanel 功能失效】。
+         现在 19000 < 19999 → 经典版赢 → 它的功能完好。
+         若经典版不在（单独用本 mod）→ 我们仍生效 → 使节动作可用。
+         面板另有 Ctrl+E 热键入口（CSF_Panel.lua），所以即使这里被让位，功能也不丢。 -->
     <ReplaceUIScript id="CSF_REPLACE_UNITPANEL">
       <Properties>
-        <LoadOrder>500000</LoadOrder>
+        <LoadOrder>19000</LoadOrder>
         <LuaContext>UnitPanel</LuaContext>
         <LuaReplace>UI/CSF_UnitPanel.lua</LuaReplace>
       </Properties>
