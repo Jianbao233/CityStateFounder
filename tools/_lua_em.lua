@@ -1,0 +1,1 @@
+print("PROBE ExposedMembers=" .. type(ExposedMembers) .. " CSF=" .. type(ExposedMembers ~= nil and ExposedMembers.CSF or nil) .. " Map=" .. type(Map) .. " Players=" .. type(Players))

@@ -1,0 +1,1 @@
+print("AT=" .. type(ActionTypes) .. " DET=" .. type(DoEndTurn) .. " ETS=" .. type(EndTurn))

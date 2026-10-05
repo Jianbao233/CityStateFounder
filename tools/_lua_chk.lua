@@ -1,0 +1,1 @@
+print("CHECK C6FW=" .. type(C6FW) .. " ExposedMembers=" .. type(ExposedMembers) .. " CSF=" .. type(ExposedMembers ~= nil and ExposedMembers.CSF or nil) .. " Map=" .. type(Map))
