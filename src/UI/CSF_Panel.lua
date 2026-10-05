@@ -180,9 +180,19 @@ function CSF_Refresh()
     --   为什么要过滤：本局只有 N 个城邦（N 由开局设置决定），
     --   其余 48-N 个在运行时建不出「完全可用」的城邦（引擎不支持，见 T-115/T-118）。
     --   列出来却点不了只会让人困惑，所以直接只显示可用的，并提示如何获得更多。
+    -- ⭐ 只列【真正能建】的城邦。
+    --
+    --   2026-10-06 更新：现在有**两条**可用路径，都要列：
+    --     · "reuse" —— 本局已有同文明休眠玩家 → 直接复用
+    --     · "slot"  —— ★ 该文明有【自己的未激活预注册槽】→ 激活它
+    --                  引擎开局把全部 54 个城邦文明都预注册成槽（status=5），
+    --                  所以这条路能建**全部 54 个里的任意一个**，且【不改文明】→ 不崩。
+    --
+    --   仍然不列 "retarget" / "dynamic" / "unavailable"：
+    --   前者改文明（实测挂起），后者是半成品 —— 列出来却点不了只会让人困惑。
     local tList = {};
     for _, kEntry in ipairs(tAll) do
-        if kEntry.Mode == "reuse" then
+        if kEntry.Mode == "reuse" or kEntry.Mode == "slot" then
             tList[#tList + 1] = kEntry;
         end
     end

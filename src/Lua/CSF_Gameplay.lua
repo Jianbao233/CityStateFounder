@@ -114,7 +114,17 @@ local CSF_SLOT_AI = 1;
 --   指定想要的城邦 —— 那些都是引擎在开局时正确创建的，本模组可以正常地把它们
 --   放到地图上。
 -- ───────────────────────────────────────────────────────────────────────────
-local CSF_ENABLE_DYNAMIC_CREATION = false;
+-- ★★★★★ 2026-10-06【新路径开关】：激活「该文明自己的未激活预注册槽」
+--
+--   引擎开局把全部 54 个城邦文明预注册成玩家槽（status=5，未激活）。
+--   每个文明有自己专属的槽 → 想建哪个城邦就激活哪个槽。
+--   这条路【不改文明】→ 不触发"玩家与引擎预注册不一致"的崩溃。
+--
+--   实测（2026-10-06，DLL 修复后）：四步配方成功、挂机 4 回合无崩溃、
+--   与引擎自己激活的槽状态完全同态。
+--
+--   ⚠️ 依赖已修复的 DLL（player+0x83a 与子系统写回）；旧 DLL 会崩（NULL+0xb0）。
+local CSF_ENABLE_SLOT_ACTIVATION = true;
 
 -- 【数量上限】每个玩家最多同时拥有几个「建邦使节」
 --   -1 = 不限制（= 自然上限，即"能造多少就造多少"，按用户要求的默认值）
@@ -1325,12 +1335,33 @@ local function CSF_GetFoundableCityStates()
     for _, row in ipairs(tRows) do
         local iDormant = tDormant[row.CivilizationType];
         -- 机制完整性分档：
-        --   "reuse"    本局已有同文明休眠玩家 → 直接复用（**唯一真正可用的路径**）
-        --   "retarget" 借用休眠玩家改成目标文明 → ⚠️ 默认关闭（半成品，见 T-109）
-        --   "dynamic"  AddPlayer 新建        → ⚠️ 默认关闭（半成品 + 崩溃风险）
+        --   "reuse"     本局已有同文明休眠玩家 → 直接复用
+        --   "slot"      ★ 2026-10-06 新增：该文明有【自己的未激活预注册槽】→ 激活它
+        --               这条路**不改文明** → 不崩；能用全部 54 个里的任意一个。
+        --   "retarget"  借用休眠玩家改成目标文明 → ⚠️ 默认关闭（改文明 → 挂起）
+        --   "dynamic"   AddPlayer 新建        → ⚠️ 默认关闭（半成品 + 崩溃风险）
         local sMode;
         if iDormant ~= nil then
             sMode = "reuse";
+        elseif CSF_ENABLE_SLOT_ACTIVATION then
+            -- 找该文明自己的未激活槽
+            local iFree = nil;
+            for j = 0, 63 do
+                local pCfg = CSF_Safe(function() return PlayerConfigurations[j] end);
+                if pCfg ~= nil then
+                    local sThisCiv = CSF_Safe(function() return pCfg:GetCivilizationTypeName() end);
+                    if sThisCiv == row.CivilizationType then
+                        local bAlive = CSF_Safe(function() return Players[j]:IsAlive() end);
+                        if bAlive ~= true then iFree = j; break end;
+                    end
+                end
+            end
+            if iFree ~= nil then
+                sMode = "slot";
+                iDormant = iFree;        -- 面板/建立函数都用 ReusePlayerID 这个字段
+            else
+                sMode = "unavailable";
+            end
         elseif CSF_ALLOW_RETARGET then
             sMode = "retarget";          -- ⚠️ 半成品（T-109），默认关
         elseif CSF_ENABLE_DYNAMIC_CREATION then
@@ -1348,9 +1379,8 @@ local function CSF_GetFoundableCityStates()
             BonusXP2         = row.Bonus_XP2,
             ReusePlayerID    = iDormant,
             Mode             = sMode,
-            -- reuse（真·原生城邦）与 dynamic（实测正确的全新建玩家）都机制完整；
-            -- retarget 是半成品，**不谎报为"完整"**。
-            CanReceiveInfluence = (sMode == "reuse" or sMode == "dynamic"),
+            -- reuse / slot / dynamic 都机制完整；retarget 是半成品，**不谎报为"完整"**。
+            CanReceiveInfluence = (sMode == "reuse" or sMode == "slot" or sMode == "dynamic"),
         };
     end
 
@@ -1358,6 +1388,7 @@ local function CSF_GetFoundableCityStates()
           " (domain=" .. tostring(sDomain) ..
           ", 本局已有同文明休眠玩家 = " .. tostring(iDormantCount) ..
           " 个；retarget=" .. tostring(CSF_ALLOW_RETARGET) ..
+          " slotActivate=" .. tostring(CSF_ENABLE_SLOT_ACTIVATION) ..
           " dynamic=" .. tostring(CSF_ENABLE_DYNAMIC_CREATION) .. ")");
     return tOut;
 end
@@ -1790,6 +1821,56 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     print("[CSF] 回滚信息不足（原文明/领袖读不到），跳过回滚");
                 end
             end
+        end
+    end
+
+    -- ★★★★★ 2026-10-06【新路径】激活「该文明自己的未激活预注册槽」
+    --
+    --   背景：引擎开局把**全部 54 个城邦文明**都预注册成玩家槽（status=5，未激活）。
+    --         每个文明有**自己专属**的槽 → 想建哪个城邦，就激活哪个槽。
+    --         这条路**不需要改文明**，所以不会触发"玩家与引擎预注册不一致"的崩溃。
+    --
+    --   实测（2026-10-06，DLL 修复后）：
+    --     ① C6FW.ActivatePlayer(slot)         → ok
+    --     ② pm:SetPlayerSlotStatus(slot, 1)   → ok（status 5 → 1）
+    --     ③ C6FW.SetAlive(slot, 1)            → ok
+    --     ④ 放移民                            → ok
+    --     复查：IsAlive=true、GetCivType 正确、GetDiplomacy/GetInfluence 有效
+    --     挂机推进 4 回合【无崩溃】，与引擎自己激活的槽状态完全同态。
+    --
+    --   ★ 与 reuse 的区别：reuse 只能用【本局已休眠】的少数几个；
+    --     这条路能用**全部 54 个**里的任意一个（只要它的槽还没被激活）。
+    --
+    --   ⚠️ 前提：DLL 必须已修复 player+0x83a（initialized）与子系统写回；
+    --      旧 DLL 走这条路会崩（读 NULL+0xb0 = diplomaticAI）。
+    if iReuse == nil and CSF_ENABLE_SLOT_ACTIVATION then
+        local iSlot = nil;
+        for j = 0, 63 do
+            local pCfg = CSF_Safe(function() return PlayerConfigurations[j] end);
+            if pCfg ~= nil then
+                local sThisCiv = CSF_Safe(function() return pCfg:GetCivilizationTypeName() end);
+                if sThisCiv == sCiv then
+                    local bAlive = CSF_Safe(function() return Players[j]:IsAlive() end);
+                    if bAlive ~= true then iSlot = j; break end;
+                end
+            end
+        end
+        if iSlot ~= nil then
+            print("[CSF] slot-activate: " .. tostring(sCiv) ..
+                  " 有未激活的预注册槽 " .. tostring(iSlot) .. " → 激活它");
+            local bAct = CSF_ActivateCityStateSlot(iSlot);
+            if bAct == true then
+                print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活成功，放移民");
+                local bOkS, sReasonS = CSF_FoundCityState(iSlot, iX, iY, iUnitID, iOwnerID);
+                if bOkS == true then
+                    return true, "ok", iSlot, true;
+                end
+                print("[CSF] slot-activate: 放移民失败（" .. tostring(sReasonS) .. "）");
+                return false, sReasonS, iSlot;
+            end
+            print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活失败");
+        else
+            print("[CSF] slot-activate: " .. tostring(sCiv) .. " 没有可用的未激活槽");
         end
     end
 
