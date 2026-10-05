@@ -1935,7 +1935,11 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 --   （无弹窗、无事件日志，Tuner 拒绝连接）。所以放之前再确认：
                 --     ① 地块无主（GetOwner == -1）
                 --     ② 地块上没有城市
-                --     ③ 半径 2 内没有任何单位的格子（用上面收集的表查）
+                --     ③ 半径 2 内没有【任何玩家的】单位
+                --
+                --   ⚠️ 不能复用 FindFoundLocation 里的 tUnitPlots —— 那是**那个函数的局部变量**，
+                --      在本函数里是 nil，索引它会抛异常（实测 reason=threw）。
+                --      所以这里**内联**自己扫一遍单位。
                 local bSafe = true;
                 local pChk = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
                 if pChk == nil then bSafe = false end;
@@ -1948,20 +1952,40 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     end
                 end
                 if bSafe then
-                    local pCity = CSF_Safe(function() return pChk:GetCity() end);
-                    if pCity ~= nil then
+                    -- 城市检查：用 Cities 管理器（plot:GetCity 不一定存在）
+                    local pCityInPlot = CSF_Safe(function() return Cities.GetCityInPlot(iX, iY) end);
+                    if pCityInPlot ~= nil then
                         bSafe = false;
                         print("[CSF] slot-activate: ⛔ 地块上有城市，拒绝放移民");
                     end
                 end
                 if bSafe then
-                    for ddy = -2, 2 do
-                        for ddx = -2, 2 do
-                            if tUnitPlots[(iX + ddx) * 1000 + (iY + ddy)] == true then
-                                bSafe = false;
+                    -- 单位检查：半径 2 内任何玩家的单位都算危险（内联扫，不用别的函数的局部表）
+                    local function nearAnyUnit(tIDs)
+                        CSF_Safe(function()
+                            for _, iPlayer in ipairs(tIDs) do
+                                local pP = Players[iPlayer];
+                                if pP ~= nil then
+                                    local pUnits = CSF_Safe(function() return pP:GetUnits() end);
+                                    if pUnits ~= nil then
+                                        pcall(function()
+                                            for _, pUnit in pUnits:Members() do
+                                                local ux = CSF_Safe(function() return pUnit:GetX() end);
+                                                local uy = CSF_Safe(function() return pUnit:GetY() end);
+                                                if ux ~= nil and uy ~= nil
+                                                   and math.abs(ux - iX) <= 2
+                                                   and math.abs(uy - iY) <= 2 then
+                                                    bSafe = false;
+                                                end
+                                            end
+                                        end);
+                                    end
+                                end
                             end
-                        end
+                        end);
                     end
+                    nearAnyUnit(PlayerManager.GetAliveMajorIDs());
+                    nearAnyUnit(PlayerManager.GetAliveMinorIDs());
                     if not bSafe then
                         print("[CSF] slot-activate: ⛔ 地块半径 2 内有单位，拒绝放移民（防挂起）");
                     end
