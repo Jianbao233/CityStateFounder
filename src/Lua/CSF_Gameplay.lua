@@ -1871,12 +1871,39 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             local bAct = fAct(iSlot);
             if bAct == true then
                 print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活成功，放移民");
-                local bOkS, sReasonS = CSF_FoundCityState(iSlot, iX, iY, iUnitID, iOwnerID);
-                if bOkS == true then
-                    return true, "ok", iSlot, true;
+
+                -- ⚠️⚠️⚠️ 2026-10-06 修正：**绝不能调 CSF_FoundCityState！**
+                --
+                --   那个函数（本文件行 552）用的是 `pPlayer:GetCities():Create(iX, iY)`，
+                --   而它自己的注释（行 605）就写着：
+                --       "实测崩溃日志精确停在这里：`[step] cities:Create(48,13) ...`（无 returned OK）"
+                --   —— 它是**已知会崩**的旧实现。用户实测（2026-10-06）：
+                --       点面板「建立」→ 日志停在 `[step] cities:Create(16,26) player=41 before=0`
+                --       → 游戏直接退出，无弹窗、无转储。
+                --
+                --   正确做法与 reuse 分支完全一致（T-123）：
+                --     ① 先解除预留标记（否则 UnitAddedToMap 会把刚放的移民当"溜回来的"杀掉）
+                --     ② 放一个 UNIT_SETTLER，让城邦**自己的 AI** 建城
+                --     ③ 消耗掉建邦使节
+                if m_tReserved[iSlot] then
+                    m_tReserved[iSlot] = nil;
+                    print("[CSF] slot-activate: 解除槽 " .. tostring(iSlot) .. " 的预留标记");
                 end
-                print("[CSF] slot-activate: 放移民失败（" .. tostring(sReasonS) .. "）");
-                return false, sReasonS, iSlot;
+
+                local bUnit = pcall(function()
+                    UnitManager.InitUnit(iSlot, "UNIT_SETTLER", iX, iY);
+                end);
+                print("[CSF] slot-activate: 放移民到 (" .. tostring(iX) .. "," .. tostring(iY) ..
+                      ") ok=" .. tostring(bUnit));
+                if not bUnit then
+                    return false, "settler_failed", iSlot;
+                end
+
+                CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+
+                print("[CSF] slot-activate: 槽 " .. tostring(iSlot) ..
+                      " 的移民已就位，将在它的回合自行建城");
+                return true, "ok", iSlot, true;
             end
             print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活失败");
         else
