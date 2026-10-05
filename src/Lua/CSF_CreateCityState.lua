@@ -165,7 +165,7 @@ function CSF_ApplyCityStateColor(iSlot)
               .. " color=" .. tostring(iColor) .. "（" .. tostring(sCiv) .. "）");
         return true;
     end
-    print("[CSF] ❌ 补色失败 slot=" .. tostring(iSlot) .. " err=" .. tostring(r));
+    print("[CSF] 补色跳过（不影响功能，旗标有三级兜底）slot=" .. tostring(iSlot) .. " err=" .. tostring(r));
     return false;
 end
 
