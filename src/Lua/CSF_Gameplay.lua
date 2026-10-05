@@ -2079,14 +2079,51 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             print("[CSF] un-reserved city-state " .. tostring(iReuse) .. " before settling");
         end
 
-        local bUnit = pcall(function()
-            UnitManager.InitUnit(iReuse, "UNIT_SETTLER", iX, iY);
-        end);
-        print("[CSF] settle: placed settler of player " .. tostring(iReuse) ..
-              " at (" .. tostring(iX) .. "," .. tostring(iY) .. ") ok=" .. tostring(bUnit));
+        -- ★★★★★ 2026-10-06【与 slot-activate 分支统一】：**校验后直接 Create**
+        --
+        --   原来这里只放 UNIT_SETTLER，指望城邦 AI 自己建城 —— **实测不成立**：
+        --   推进 17 回合城市数仍是 0（城邦 AI 不主动建城）。
+        --   而 `Cities:Create` 在【合法地块】上是能用的（崩的只是有主/有城的地）。
+        local bSafeR = true;
+        local pChkR = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
+        if pChkR == nil then bSafeR = false end;
+        if bSafeR then
+            local iOwnR = CSF_Safe(function() return pChkR:GetOwner() end);
+            local iMineR = iOwnerID;
+            if iMineR == nil then pcall(function() iMineR = Game.GetLocalPlayer() end) end;
+            if iOwnR ~= nil and iOwnR ~= -1 and iOwnR ~= iMineR then
+                bSafeR = false;
+                print("[CSF] settle: ⛔ 地块属于别的玩家（" .. tostring(iOwnR) .. "）");
+            end
+        end
+        if bSafeR then
+            local pCityR = CSF_Safe(function() return Cities.GetCityInPlot(iX, iY) end);
+            if pCityR ~= nil then
+                bSafeR = false;
+                print("[CSF] settle: ⛔ 地块上已有城市");
+            end
+        end
 
-        if not bUnit then
-            -- 放不上去 → 恢复预留标记，避免它变成"会乱跑"的城邦
+        local iAfterR = 0;
+        if bSafeR then
+            local bCr = pcall(function() Players[iReuse]:GetCities():Create(iX, iY) end);
+            pcall(function() iAfterR = Players[iReuse]:GetCities():GetCount() end);
+            print("[CSF] settle: Cities:Create(" .. tostring(iX) .. "," .. tostring(iY) ..
+                  ") player=" .. tostring(iReuse) .. " ok=" .. tostring(bCr) ..
+                  " 城市数=" .. tostring(iAfterR));
+        end
+
+        local bUnit = true;
+        if iAfterR < 1 then
+            print("[CSF] settle: ⚠️ Create 未生效 → 退回放移民");
+            bUnit = pcall(function()
+                UnitManager.InitUnit(iReuse, "UNIT_SETTLER", iX, iY);
+            end);
+            print("[CSF] settle: 放移民 ok=" .. tostring(bUnit));
+        end
+
+        if iAfterR < 1 and not bUnit then
+            -- Create 和放移民都失败 → 恢复预留标记，避免它变成"会乱跑"的城邦
             m_tReserved[iReuse] = true;
             return false, "settler_failed", iReuse, true;
         end
@@ -2095,7 +2132,7 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
         CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
 
         print("[CSF] settle: 城邦 " .. tostring(iReuse) ..
-              " 的移民已就位，将在它的回合自行建城");
+              " 建邦完成（城市数 " .. tostring(iAfterR) .. "）");
         return true, "ok", iReuse, true;        -- bFullMechanics = true
     end
 
