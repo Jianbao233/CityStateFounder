@@ -479,14 +479,27 @@ function CSF_Initialize()
     --   **完全不碰 UnitPanel** → **与经典版零冲突**。
     --
     --   注意：热键只是**多一个入口**，使节单位与它的动作都保留不变。
-    ContextPtr:SetInputHandler(function(kInputStruct)
-        if kInputStruct.keyCode == Keys.VK_ESCAPE and not Controls.CSFRoot:IsHidden() then
+    --   ⚠️⚠️⚠️ 2026-10-06 修正：**输入结构体是【对象】，必须用方法取值！**
+    --
+    --   原来写的是 `kInputStruct.keyCode` / `kInputStruct.controlDown`
+    --   —— 这两个**字段都不存在**（永远是 nil）→ 热键**从来没触发过**，
+    --   而且**原来的 ESC 关闭也是同样写法 → 也一直是坏的**。
+    --
+    --   正确 API（游戏自己的源码为证）：
+    --     pInputStruct:GetKey()            ActionPanel.lua:1097 / WorldBuilder.lua:32
+    --     pInputStruct:IsControlDown()     WorldBuilder.lua:32
+    --     pInputStruct:IsShiftDown()       ActionPanel.lua:1097
+    --     pInputStruct:IsAltDown()         CreditsScreen.lua:60
+    --   例：WorldBuilder.lua:32
+    --     elseif uiKey == Keys.Z and pInputStruct:IsControlDown() then
+    ContextPtr:SetInputHandler(function(pInputStruct)
+        local uiKey = pInputStruct:GetKey();
+        if uiKey == Keys.VK_ESCAPE and not Controls.CSFRoot:IsHidden() then
             CSF_Close();
             return true;
         end
         -- Ctrl+E：打开/关闭面板
-        if kInputStruct.keyCode == Keys.VK_E
-           and (kInputStruct.controlDown == true or kInputStruct.ctrlDown == true) then
+        if uiKey == Keys.VK_E and pInputStruct:IsControlDown() then
             if Controls.CSFRoot:IsHidden() then
                 print("[CSF] 热键 Ctrl+E：打开面板");
                 CSF_Open();
