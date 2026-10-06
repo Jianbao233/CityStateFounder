@@ -152,14 +152,30 @@ function CSF_ApplyCityStateColor(iSlot)
     end
 
     -- ③ 交给 DLL 写（Lua 层没有颜色的 setter）
-    if C6FW == nil or C6FW.SetPlayerColor == nil then
-        print("[CSF] ⚠️ 补色：C6FW.SetPlayerColor 不可用（未安装 C6FW DLL）—— "
-              .. "该城邦将没有旗标颜色，交互时可能崩溃");
+    --
+    --   ★★★★★ 2026-10-06【关键修复】优先用 **SetPlayerColorBySlot(slot, color)**！
+    --
+    --   为什么：旧的 `SetPlayerColor(PlayerConfigurations[slot], color)` **永远失败**
+    --   （DLL 的 `GetInstance(L, idx, 0)` 拿不到 PlayerConfiguration 的 C++ 指针）
+    --   → 城邦**没有颜色** → 旗标渲染成**白色** → UI 读 NULL+0xc → **游戏崩溃**。
+    --   （用户实测原话："看到城邦的配色是白色而不是原本的红色，就在这个时候游戏崩溃了"）
+    --
+    --   新接口在 C++ 侧用引擎自己的查法：cfg = FUN_1802209a0(FUN_1807d0780(), slot)
+    if C6FW == nil then
+        print("[CSF] ⚠️ 补色：C6FW 不可用（未安装 DLL）—— 该城邦将没有旗标颜色，交互时可能崩溃");
         return false;
     end
-    local ok2, r = pcall(function()
-        return C6FW.SetPlayerColor(PlayerConfigurations[iSlot], iColor);
-    end);
+    local ok2, r = nil, nil;
+    if C6FW.SetPlayerColorBySlot ~= nil then
+        ok2, r = pcall(function() return C6FW.SetPlayerColorBySlot(iSlot, iColor) end);
+        print("[CSF] 补色（BySlot）：ok=" .. tostring(ok2) .. " 返回=" .. tostring(r));
+    end
+    if (ok2 ~= true or r == nil) and C6FW.SetPlayerColor ~= nil then
+        -- 退回旧接口（大概率失败，但保留兼容）
+        ok2, r = pcall(function()
+            return C6FW.SetPlayerColor(PlayerConfigurations[iSlot], iColor);
+        end);
+    end
     if ok2 and r ~= nil then
         print("[CSF] ✅ 补色成功 slot=" .. tostring(iSlot)
               .. " color=" .. tostring(iColor) .. "（" .. tostring(sCiv) .. "）");
