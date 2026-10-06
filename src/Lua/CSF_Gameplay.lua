@@ -1948,6 +1948,29 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             if bAct == true then
                 print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活成功，放移民");
 
+                -- ★★★★★ 2026-10-07【补色 —— 必须尽早做】
+                --
+                --   没颜色的玩家，旗标会被 UI 渲染成**白色**，随后 UI 读 NULL+0xc
+                --   **直接崩游戏**（用户 2026-10-06 实测原话："打开全图视野后发现城邦的
+                --   配色是白色而不是原本的红色，就在这个时候游戏崩溃了"）。
+                --
+                --   实现：`ExposedMembers.CSF.ApplyCityStateColor` →
+                --         C6FW.CopyPlayerColor(同场城邦槽, 新槽)，读写都在 DLL 里，
+                --         走引擎自己的 PlayerConfiguration 取法
+                --         `*(void**)(DAT_180b8aa78 + 0x90) + slot * 0x20`。
+                --   （跨文件必须走 ExposedMembers —— 局部函数在这里是 nil。）
+                do
+                    local fCol = (ExposedMembers ~= nil and ExposedMembers.CSF ~= nil)
+                                  and ExposedMembers.CSF.ApplyCityStateColor or nil;
+                    if fCol ~= nil then
+                        local okC, rC = pcall(fCol, iSlot);
+                        print("[CSF] slot-activate: 补色 ok=" .. tostring(okC)
+                              .. " 结果=" .. tostring(rC));
+                    else
+                        print("[CSF] slot-activate: ⚠️ ApplyCityStateColor 不可用（补色跳过）");
+                    end
+                end
+
                 -- ⚠️⚠️⚠️ 2026-10-06 修正：**绝不能调 CSF_FoundCityState！**
                 --
                 --   那个函数（本文件行 552）用的是 `pPlayer:GetCities():Create(iX, iY)`，

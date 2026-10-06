@@ -27,11 +27,11 @@
 --     三步后 alive=true、cities=1、首都"拉文塔"(19,5)、人口 1、所有者 36
 --   原生性：IsMajor=false、GetDiplomacy() 有效、GetInfluence() 有效
 --
--- ── 已知缺陷 ────────────────────────────────────────────────────────────
---   ⚠️ **颜色没绑上**：`UI.GetPlayerColors(slot)` 返回 nil。
---      但文明本身有颜色定义（`UI.GetPlayerColorValues(civType,0)` 有值）。
---      缺的是「槽位 → 颜色」的绑定，尚在追（见文档 §10.4）。
---      影响：旗标无颜色，**不影响功能**。
+-- ── 已知缺陷（2026-10-07 已修）──────────────────────────────────────────
+--   ✅ **颜色已绑上**：`C6FW.CopyPlayerColor(src, dst)` 从同场城邦抄色。
+--      之前的根因是 DLL 里查 PlayerConfiguration 的姿势错了（索引了文明表），
+--      现在统一走引擎自己的取法 `*(void**)(DAT_180b8aa78 + 0x90) + slot * 0x20`。
+--      影响面：旗标颜色 = 城邦红，与官方城邦一致。
 -- ===========================================================================
 
 -- 引擎内部的槽位状态枚举（**不是** Lua 的 SS_*）
@@ -98,90 +98,106 @@ function CSF_FindInactiveCityStateSlot(sCivFilter)
     return -1, nil, nil;
 end
 
---- ⭐ 给某个槽补上颜色（需要 C6FW DLL 提供 C6FW.SetPlayerColor）。
--- 逆向依据：颜色与槽位状态是同一属性表的两个属性（getter vtable +0x58 / setter +0x130），
--- 但只有槽位状态有 Lua 包装 —— 颜色 setter 必须走 DLL。
+--- ⭐ 给某个槽补上颜色（走 C6FW DLL 的 CopyPlayerColor / SetPlayerColorBySlot）。
+--
+-- ★★★★★ 2026-10-07【第二次修正 —— 这次是真正的根因】
+--
+--   之前 `C6FW.SetPlayerColorBySlot` 会**卡死游戏**。逆向查清了：
+--     旧实现 cfg = FUN_1802209a0(FUN_1807d0780(), slot)  ❌
+--   但 `FUN_1807d0780()` 是**文明表**，`FUN_1802209a0` 是通用 vector 取元素，
+--   第二个参数是**文明索引**（FUN_180228580 里传的是 FUN_180169ee0(cfg)），
+--   **不是玩家槽位**。拿槽位去索引文明表 → 越界垃圾指针 → setter 跳
+--   [垃圾+0x130] → 卡死。
+--
+--   引擎自己的取法（FUN_180617370 / FUN_180616d30 / FUN_1806185f0 /
+--   FUN_1806172d0 / FUN_180619a00 五处完全一致）：
+--       mgr  = FUN_180164c20()             // 就是 `return DAT_180b8aa78;`
+--       base = *(void**)(mgr + 0x90)       // PlayerConfiguration 数组基址
+--       cfg  = (char*)base + slot * 0x20   // 步长 0x20，按玩家 ID 索引
+--   C6FW 已按这个改好（GetPlayerColorBySlot / CopyPlayerColor /
+--   SetPlayerColorBySlot 全部走正确取法）。
+--
+--   颜色值语义（来自 FUN_180619a00 读 Players 表 Color 列）：
+--       0xffffffff = 无效/未设   0 = UNDEFINED   其它 = ColorType 索引
+--
 -- @return true / false（DLL 不可用时返回 false 并打警告）
 function CSF_ApplyCityStateColor(iSlot)
-    -- 取该槽的颜色值：优先按【文明】取（城邦颜色是按文明定义的）
-    local sCiv = nil;
-    pcall(function() sCiv = PlayerConfigurations[iSlot]:GetCivilizationTypeName() end);
-
-    -- ⚠️⚠️ 2026-10-04 修正：GetColor() 在"没颜色"时返回的是 **-1**（不是 nil、不是 0）！
-    --   原代码只判 nil/0 → 于是拿着 -1 去 SetPlayerColor → 等于没补色。
-    --   实测：激活后的城邦 GetColor() = -1；引擎创建的城邦有真实值。
     local function hasColor(v)
         return v ~= nil and v ~= 0 and v ~= -1 and v ~= 4294967295;
     end
 
-    local iColor = nil;
-    pcall(function() iColor = PlayerConfigurations[iSlot]:GetColor() end);
+    local sCiv = nil;
+    pcall(function() sCiv = PlayerConfigurations[iSlot]:GetCivilizationTypeName() end);
 
-    -- ① 按【文明】取（城邦颜色是按文明定义的 —— 我们补了 PlayerColors 表，走这条）
-    if not hasColor(iColor) and sCiv ~= nil and UI ~= nil
-       and UI.GetPlayerColorValues ~= nil then
-        local ok, iBack = pcall(function() return UI.GetPlayerColorValues(sCiv, 0) end);
-        if ok and hasColor(iBack) then
-            iColor = iBack;
-            print("[CSF] 补色：按文明取到 " .. tostring(iColor) .. "（" .. tostring(sCiv) .. "）");
-        end
+    if C6FW == nil then
+        print("[CSF] ⚠️ 补色：C6FW 不可用（未安装 DLL）—— 该城邦将没有旗标颜色，交互时可能崩溃");
+        return false;
     end
 
-    -- ② 兜底：抄【场上任意一个已有颜色的城邦】
-    --    为什么需要：万一 ① 取不到（UI 表在 GameCore 上下文里有时不可用），
-    --    至少让旗标有个合法颜色 —— 没颜色的旗标在交互时会崩（见 CityBannerManager）。
-    if not hasColor(iColor) then
-        for j = 0, 63 do
-            if j ~= iSlot then
-                local c2, lvl = nil, nil;
-                pcall(function() c2 = PlayerConfigurations[j]:GetColor() end);
+    -- ── 读色：优先 DLL（最可靠），退回 Lua 的 GetColor() ──────────────────
+    local function readColor(j)
+        if C6FW.GetPlayerColorBySlot ~= nil then
+            local ok, r = pcall(C6FW.GetPlayerColorBySlot, j);
+            if ok and hasColor(r) then return r end;
+        end
+        local c = nil;
+        pcall(function() c = PlayerConfigurations[j]:GetColor() end);
+        if hasColor(c) then return c end;
+        return nil;
+    end
+
+    -- ① 自己已经有合法颜色 → 什么都不用做
+    local iMine = readColor(iSlot);
+    if iMine ~= nil then
+        print("[CSF] 补色：slot " .. tostring(iSlot) .. " 已有颜色 " .. tostring(iMine));
+        return true;
+    end
+
+    -- ② 找合法来源：**优先同场城邦**（用户要求：颜色复用），其次任意有色的玩家
+    local iSrc, iSrcColor = -1, nil;
+    local iAnySrc, iAnyColor = -1, nil;
+    for j = 0, 63 do
+        if j ~= iSlot then
+            local c = readColor(j);
+            if c ~= nil then
+                if iAnySrc < 0 then iAnySrc, iAnyColor = j, c end;
+                local lvl = nil;
                 pcall(function() lvl = PlayerConfigurations[j]:GetCivilizationLevelTypeName() end);
-                if lvl == "CIVILIZATION_LEVEL_CITY_STATE" and hasColor(c2) then
-                    iColor = c2;
-                    print("[CSF] 补色：抄同场城邦 slot " .. tostring(j)
-                          .. " 的颜色 " .. tostring(iColor));
+                if lvl == "CIVILIZATION_LEVEL_CITY_STATE" then
+                    iSrc, iSrcColor = j, c;
                     break;
                 end
             end
         end
     end
+    if iSrc < 0 then iSrc, iSrcColor = iAnySrc, iAnyColor end;
 
-    if not hasColor(iColor) then
-        print("[CSF] 补色：取不到颜色值（" .. tostring(sCiv) .. "）");
+    if iSrc < 0 then
+        print("[CSF] 补色：场上找不到任何有颜色的玩家（" .. tostring(sCiv) .. "）");
         return false;
     end
 
-    -- ③ 交给 DLL 写（Lua 层没有颜色的 setter）
-    --
-    --   ★★★★★ 2026-10-06【关键修复】优先用 **SetPlayerColorBySlot(slot, color)**！
-    --
-    --   为什么：旧的 `SetPlayerColor(PlayerConfigurations[slot], color)` **永远失败**
-    --   （DLL 的 `GetInstance(L, idx, 0)` 拿不到 PlayerConfiguration 的 C++ 指针）
-    --   → 城邦**没有颜色** → 旗标渲染成**白色** → UI 读 NULL+0xc → **游戏崩溃**。
-    --   （用户实测原话："看到城邦的配色是白色而不是原本的红色，就在这个时候游戏崩溃了"）
-    --
-    --   新接口在 C++ 侧用引擎自己的查法：cfg = FUN_1802209a0(FUN_1807d0780(), slot)
-    if C6FW == nil then
-        print("[CSF] ⚠️ 补色：C6FW 不可用（未安装 DLL）—— 该城邦将没有旗标颜色，交互时可能崩溃");
-        return false;
-    end
-    local ok2, r = nil, nil;
-    if C6FW.SetPlayerColorBySlot ~= nil then
-        ok2, r = pcall(function() return C6FW.SetPlayerColorBySlot(iSlot, iColor) end);
-        print("[CSF] 补色（BySlot）：ok=" .. tostring(ok2) .. " 返回=" .. tostring(r));
-    end
-    if (ok2 ~= true or r == nil) and C6FW.SetPlayerColor ~= nil then
-        -- 退回旧接口（大概率失败，但保留兼容）
-        ok2, r = pcall(function()
-            return C6FW.SetPlayerColor(PlayerConfigurations[iSlot], iColor);
-        end);
-    end
-    if ok2 and r ~= nil then
-        print("[CSF] ✅ 补色成功 slot=" .. tostring(iSlot)
-              .. " color=" .. tostring(iColor) .. "（" .. tostring(sCiv) .. "）");
+    -- ③ ★ DLL 抄色：src → iSlot（读+写都在 C++ 侧，走正确 cfg 取法）
+    local ok2, r2 = pcall(C6FW.CopyPlayerColor, iSrc, iSlot);
+    if ok2 and hasColor(r2) then
+        print("[CSF] ✅ 补色成功 slot=" .. tostring(iSlot) .. " ← slot " .. tostring(iSrc)
+              .. " 颜色=" .. tostring(r2) .. "（" .. tostring(sCiv) .. "）");
         return true;
     end
-    print("[CSF] 补色跳过（不影响功能，旗标有三级兜底）slot=" .. tostring(iSlot) .. " err=" .. tostring(r));
+
+    -- ④ 兜底：直接写（万一 CopyPlayerColor 没导出）
+    if C6FW.SetPlayerColorBySlot ~= nil then
+        local ok3, r3 = pcall(C6FW.SetPlayerColorBySlot, iSlot, iSrcColor);
+        if ok3 and hasColor(r3) then
+            print("[CSF] ✅ 补色成功(直接写) slot=" .. tostring(iSlot)
+                  .. " 颜色=" .. tostring(r3));
+            return true;
+        end
+    end
+
+    print("[CSF] ❌ 补色失败 slot=" .. tostring(iSlot)
+          .. " src=" .. tostring(iSrc) .. " color=" .. tostring(iSrcColor)
+          .. " err=" .. tostring(r2));
     return false;
 end
 
@@ -260,34 +276,17 @@ function CSF_ActivateCityStateSlot(iSlot)
     return true;
 end
 
---- ⭐⭐ 一站式：在 (iX, iY) 实时创建一个指定的城邦。
--- @param sCivType  目标城邦文明（如 "CIVILIZATION_LA_VENTA"）；nil = 任意一个未激活的
--- @param iX, iY    目标格
--- @return true / false
+--- ⚠️【已废弃，保留仅为兼容旧探针】一站式建邦请走 CSF_Gameplay.lua 的
+--  `CSF_FoundCityStateByCiv`（它带完整的 3 环距离/地形校验）。
+--
+--  ★ 2026-10-07：**这里原来的 `UnitManager.InitUnit(...SETTLER...)` 兜底已删除。**
+--    实测结论（记录在案）：`Cities:Create` 失败后再调 `InitUnit` 会**卡死/崩溃游戏**
+--    （InitUnit 在"创建失败的半成品玩家"上会挂）。宁可返回 false 也不能留着这颗雷。
 function CSF_CreateCityStateAt(sCivType, iX, iY)
-    local iSlot, sCiv = CSF_FindInactiveCityStateSlot(sCivType);
-    if iSlot < 0 then
-        print("[CSF] 找不到可激活的城邦槽（" .. tostring(sCivType) .. "）");
-        return false;
-    end
-    if not CSF_ActivateCityStateSlot(iSlot) then
-        print("[CSF] 激活失败 slot=" .. tostring(iSlot));
-        return false;
-    end
-    -- ⚠️⚠️ 2026-10-04：**不要用 `Cities:Create`！**
-    --   实测：`Cities:Create(x,y)` 对中途激活的城邦会**静默失败并损伤城邦**
-    --   （记录在案的 T-123）。正确做法是放一个 `UNIT_SETTLER`，
-    --   让引擎在城邦自己的回合建城 —— 走引擎的正规建城流程。
-    local ok, r = pcall(function()
-        return UnitManager.InitUnit(iSlot, "UNIT_SETTLER", iX, iY);
-    end);
-    if not ok or r == nil then
-        print("[CSF] ❌ 放移民失败 slot=" .. tostring(iSlot) .. " err=" .. tostring(r));
-        return false;
-    end
-    print("[CSF] ✅ 城邦 " .. tostring(sCiv) .. " 的移民已放在 (" ..
-          tostring(iX) .. "," .. tostring(iY) .. ")，将在它的回合自行建城");
-    return true, iSlot, sCiv;
+    print("[CSF] ⚠️ CSF_CreateCityStateAt 已废弃（InitUnit 兜底会崩游戏），"
+          .. "请改用 CSF_FoundCityStateByCiv。参数=" .. tostring(sCivType)
+          .. " (" .. tostring(iX) .. "," .. tostring(iY) .. ")");
+    return false;
 end
 
 -- 暴露给其它脚本 / 调试用

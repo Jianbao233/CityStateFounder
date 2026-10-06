@@ -242,6 +242,26 @@
         <LuaReplace>UI/CSF_CityBannerPatch.lua</LuaReplace>
       </Properties>
     </ReplaceUIScript>
+    <!-- ⭐ 2026-10-07【单位旗标兜底】
+         单位旗标同样走 UI.GetPlayerColors(playerID)，对中途激活的城邦返回 nil
+         → SetColor(nil) → 原生层读 NULL+0xc 崩溃。城邦迟早会造单位，必须堵。
+         LoadOrder 500002 > CCB MirrorMapDemo 的 12130，确保我们最后应用。 -->
+    <ReplaceUIScript id="CSF_REPLACE_UNITFLAG">
+      <Properties>
+        <LoadOrder>500002</LoadOrder>
+        <LuaContext>UnitFlagManager</LuaContext>
+        <LuaReplace>UI/CSF_UnitFlagManager.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ImportFiles id="CSF_UI_COMMON_IMPORT">
+      <Properties>
+        <LoadOrder>1004</LoadOrder>
+      </Properties>
+      <Items>
+        <File>UI/CSF_UICommon.lua</File>
+        <File>UI/CSF_UnitFlagManager.lua</File>
+      </Items>
+    </ImportFiles>
     <ImportFiles id="CSF_BANNER_IMPORT">
       <Properties>
         <LoadOrder>1003</LoadOrder>
@@ -306,5 +326,7 @@
     <File>Lua/CSF_CreateCityState.lua</File>
     <File>UI/CSF_CopyRegistry.lua</File>
     <File>UI/CSF_CityBannerPatch.lua</File>
+    <File>UI/CSF_UICommon.lua</File>
+    <File>UI/CSF_UnitFlagManager.lua</File>
   </Files>
 </Mod>

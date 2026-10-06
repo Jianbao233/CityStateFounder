@@ -25,56 +25,22 @@
 --   <游戏目录>\DLC\Expansion2\UI\CityBanners\CityBannerManager.lua:816-864
 -- ===========================================================================
 
-include("CSF_CopyRegistry");
+include("CSF_UICommon");
 
 if CSF_CityBannerManager_BaseLoaded ~= true then
     CSF_CityBannerManager_BaseLoaded = true;
     include("CityBannerManager");
 end
 
+-- 取色统一走 CSF_UICommon.lua 的 CSF_SafePlayerColors（保证非 nil）。
+-- 2026-10-07 实测确认：`UI.GetPlayerColors(slot)` 对【中途激活的城邦】返回 nil，
+-- 而 UI 那张颜色表**开局之后永不刷新**（过回合也不刷新），
+-- 且 `UI.GetPlayerColors` 是只读的、不能覆写 —— 只能在每个调用点兜底。
 local function CSF_GetBannerColors(playerID)
-    local backColor, frontColor = UI.GetPlayerColors(playerID);
-    if backColor ~= nil and frontColor ~= nil then
-        return backColor, frontColor;
-    end
-
-    local sCiv = nil;
-    pcall(function()
-        if CSF_GetCopySource ~= nil then sCiv = CSF_GetCopySource(playerID) end
-        if sCiv == nil and CSF_GetGameProp ~= nil then
-            sCiv = CSF_GetGameProp("CSF_Created_" .. tostring(playerID));
-        end
-        if sCiv == nil then
-            sCiv = PlayerConfigurations[playerID]:GetCivilizationTypeName();
-        end
-    end);
-    if sCiv ~= nil then
-        for i = 0, 63 do
-            if i ~= playerID then
-                local b2, f2 = nil, nil;
-                pcall(function()
-                    if PlayerConfigurations[i]:GetCivilizationTypeName() == sCiv then
-                        b2, f2 = UI.GetPlayerColors(i);
-                    end
-                end);
-                if b2 ~= nil and f2 ~= nil then
-                    print("[CSF] banner color: slot " .. tostring(playerID) ..
-                          " 用同文明槽 " .. tostring(i) .. " 的颜色兜底");
-                    return b2, f2;
-                end
-            end
-        end
-        local b3, f3 = nil, nil;
-        pcall(function() b3, f3 = UI.GetPlayerColorValues(sCiv, 0) end);
-        if b3 ~= nil and f3 ~= nil then
-            print("[CSF] banner color: slot " .. tostring(playerID) ..
-                  " 用文明色兜底（" .. tostring(sCiv) .. "）");
-            return b3, f3;
-        end
-    end
-
-    print("[CSF] banner color: slot " .. tostring(playerID) .. " 兜底失败，用安全色");
-    return 0xFF202020, 0xFFC0C0C0;
+    local backColor, frontColor = CSF_SafePlayerColors(playerID);
+    if backColor == nil then backColor = 0xFF202020 end;
+    if frontColor == nil then frontColor = 0xFFC0C0C0 end;
+    return backColor, frontColor;
 end
 
 -- ★ 逐行照抄 XP2 版 CityBannerManager.lua:816-864；唯一改动是取色那一行
