@@ -2148,11 +2148,17 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 pcall(function() iAfter = Players[iSlot]:GetCities():GetCount() end);
                 print("[CSF] slot-activate: 建城后城市数 = " .. tostring(iAfter));
                 if iAfter < 1 then
-                    -- 兜底：退回"放移民"（至少让玩家看到城邦单位，AI 也许将来会建）
-                    print("[CSF] slot-activate: ⚠️ Create 未生效 → 退回放移民");
-                    pcall(function()
-                        UnitManager.InitUnit(iSlot, "UNIT_SETTLER", iX, iY);
-                    end);
+                    -- ⛔⛔⛔ 2026-10-06【去掉 InitUnit 兜底】—— 它就是崩溃/挂起源！
+                    --
+                    --   实测（连续建 3 个）：
+                    --     第 2 个 Create 失败 → 退回 InitUnit 放移民
+                    --     第 3 个 Create 失败 → 又退回 InitUnit
+                    --     → 之后游戏【挂起/崩溃】（用户那次崩溃就是这个）
+                    --
+                    --   原因：`Create` 失败说明引擎的城市列表已经不一致，
+                    --   此时再 `InitUnit` 往同一地块塞单位 → 状态更乱 → 崩。
+                    --   ⇒ 失败就【如实报告】，不再做任何"补救动作"。
+                    print("[CSF] slot-activate: ❌ Create 未生效（引擎本回合已建过一个城邦）");
                 end
 
                 CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
@@ -2249,13 +2255,10 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                   " 城市数=" .. tostring(iAfterR));
         end
 
-        local bUnit = true;
+        local bUnit = false;
         if iAfterR < 1 then
-            print("[CSF] settle: ⚠️ Create 未生效 → 退回放移民");
-            bUnit = pcall(function()
-                UnitManager.InitUnit(iReuse, "UNIT_SETTLER", iX, iY);
-            end);
-            print("[CSF] settle: 放移民 ok=" .. tostring(bUnit));
+            -- ⛔ 同上：不再退回 InitUnit（它是崩溃/挂起源）
+            print("[CSF] settle: ❌ Create 未生效（引擎本回合已建过一个城邦）");
         end
 
         if iAfterR < 1 and not bUnit then
