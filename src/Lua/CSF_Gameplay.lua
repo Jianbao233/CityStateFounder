@@ -929,6 +929,7 @@ local CSF_EXTRA_DORMANT_COUNT = 0;
 --      已分配的位置冲突。**保持 false。**
 local CSF_EXTRA_SET_START_POS = false;
 
+local m_iLastFoundTurn = nil;     -- ★ 上一次成功建邦的回合（每回合限 1 个）
 local m_tReserved = {};          -- 已预留的城邦 playerID 集合
 local m_tOrphan   = {};          -- 【动态创建后建城失败】留下的玩家：Civ -> playerID
                                  -- 下次建同一文明时复用它，避免反复 AddPlayer 累积孤儿
@@ -1781,6 +1782,27 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
         return false, "bad_args";
     end
 
+    -- ★★★★★ 2026-10-06【关键限制】同一回合【只能建 1 个城邦】
+    --
+    --   实测（连续建 3 个）：
+    --     第 1 个 → Cities:Create ok → 城市数 = 1   ✅
+    --     第 2 个 → Cities:Create ok → 城市数 = 0   ← 静默失败
+    --     第 3 个 → 同上 → 之后游戏【挂起/崩溃】
+    --   三次的格子都通过了完整校验（IsValidFoundLocation -> true/ok）。
+    --
+    --   根因推断：`Create` 建出的城市【不在引擎的城市列表里立即可见】，
+    --   同一回合再建时引擎内部状态不一致 → 失败/崩。
+    --   用户那次崩溃正是连续建第 3 个时发生的。
+    --
+    --   ⇒ 每回合只允许建 1 个；同回合再点则明确告知"请下一回合再建"。
+    local iTurnNow = CSF_Safe(function() return Game.GetCurrentGameTurn() end);
+    if m_iLastFoundTurn ~= nil and iTurnNow ~= nil and m_iLastFoundTurn == iTurnNow then
+        print("[CSF] ⛔ 本回合已经建过一个城邦（回合 " .. tostring(iTurnNow) ..
+              "）—— 引擎一回合只允许建一个，请下一回合再建");
+        return false, "one_per_turn";
+    end
+    m_iLastFoundTurn = iTurnNow;
+
     -- 先把【本局所有休眠城邦玩家】列出来（0 城 = 还没建城）
     --   ⚠️ 同样要排除【已派出移民、待建城】的（T-124，防重复建邦）
     local tDormant = {};
@@ -1990,8 +2012,10 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 --   ⚠️ 不能复用 FindFoundLocation 里的 tUnitPlots —— 那是**那个函数的局部变量**，
                 --      在本函数里是 nil，索引它会抛异常（实测 reason=threw）。
                 --      所以这里**内联**自己扫一遍单位。
+                print("[CSF] [trace] 守卫开始 iX=" .. tostring(iX) .. " iY=" .. tostring(iY));
                 local bSafe = true;
                 local pChk = CSF_Safe(function() return Map.GetPlot(iX, iY) end);
+                print("[CSF] [trace] GetPlot 完成 pChk=" .. tostring(pChk ~= nil));
                 if pChk == nil then bSafe = false end;
                 if bSafe then
                     -- ⚠️⚠️ 2026-10-06 修正（用户实测：在自己领土上点建造 → unsafe_plot）：
@@ -2011,7 +2035,9 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 end
                 if bSafe then
                     -- 城市检查：用 Cities 管理器（plot:GetCity 不一定存在）
+                    print("[CSF] [trace] Cities=" .. tostring(Cities ~= nil));
                     local pCityInPlot = CSF_Safe(function() return Cities.GetCityInPlot(iX, iY) end);
+                    print("[CSF] [trace] GetCityInPlot 完成 pCityInPlot=" .. tostring(pCityInPlot ~= nil));
                     if pCityInPlot ~= nil then
                         bSafe = false;
                         print("[CSF] slot-activate: ⛔ 地块上有城市，拒绝放移民");
@@ -2078,7 +2104,9 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 --   ⇒ 用 CSF_IsValidFoundLocation 把关（含三环距离 + 水/山/冰盖）；
                 --     不合格就调 CSF_FindFoundLocation 找合格格；仍找不到就放弃。
                 if bSafe then
+                    print("[CSF] [trace] 调 IsValidFoundLocation(" .. tostring(iX) .. "," .. tostring(iY) .. ")");
                     local bOkFinal, sWhyFinal = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+                    print("[CSF] [trace] IsValidFoundLocation -> " .. tostring(bOkFinal) .. " / " .. tostring(sWhyFinal));
                     if bOkFinal ~= true then
                         print("[CSF] slot-activate: 目标格不合格（" .. tostring(sWhyFinal) ..
                               "）→ 找合格格");
