@@ -2068,6 +2068,32 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     return false, "unsafe_plot", iSlot;
                 end
 
+                -- ★★★★★ 2026-10-06【崩溃根因修复】Create 之前【必须】过完整校验（含三环距离）
+                --
+                --   实测（用户报错 Error reading address 0xc）：
+                --     · 上面的守卫只查了"无主 + 无城市"，
+                --     · 【没查"离其他城市 ≥3 格"】→ Create 落在近距离地块上 → 【原生崩溃】。
+                --   （知识库说这种地块是"静默失败"，但本机实测是【崩】，不能靠它自己失败。）
+                --
+                --   ⇒ 用 CSF_IsValidFoundLocation 把关（含三环距离 + 水/山/冰盖）；
+                --     不合格就调 CSF_FindFoundLocation 找合格格；仍找不到就放弃。
+                if bSafe then
+                    local bOkFinal, sWhyFinal = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+                    if bOkFinal ~= true then
+                        print("[CSF] slot-activate: 目标格不合格（" .. tostring(sWhyFinal) ..
+                              "）→ 找合格格");
+                        local okG, gx, gy = pcall(CSF_FindFoundLocation, iOwnerID);
+                        if okG and gx ~= nil and gx > 0 then
+                            print("[CSF] slot-activate: 改用合格格 (" .. tostring(gx) .. "," ..
+                                  tostring(gy) .. ")");
+                            iX, iY = gx, gy;
+                        else
+                            bSafe = false;
+                            print("[CSF] slot-activate: ⛔ 找不到合格格，放弃");
+                        end
+                    end
+                end
+
                 -- ★★★★★ 2026-10-06【最终方案】校验通过后，**直接用 Cities:Create 建城**
                 --
                 --   实测对照（同一局、同样激活成功）：
@@ -2167,6 +2193,22 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             if pCityR ~= nil then
                 bSafeR = false;
                 print("[CSF] settle: ⛔ 地块上已有城市");
+            end
+        end
+
+        -- ★★★★★ 2026-10-06【同 slot-activate】Create 之前必须过完整校验（含三环距离）
+        if bSafeR then
+            local bOkFR, sWhyFR = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+            if bOkFR ~= true then
+                print("[CSF] settle: 目标格不合格（" .. tostring(sWhyFR) .. "）→ 找合格格");
+                local okGR, gxR, gyR = pcall(CSF_FindFoundLocation, iOwnerID);
+                if okGR and gxR ~= nil and gxR > 0 then
+                    print("[CSF] settle: 改用合格格 (" .. tostring(gxR) .. "," .. tostring(gyR) .. ")");
+                    iX, iY = gxR, gyR;
+                else
+                    bSafeR = false;
+                    print("[CSF] settle: ⛔ 找不到合格格，放弃");
+                end
             end
         end
 
