@@ -313,6 +313,106 @@ local function CSF_IsValidFoundLocation(iX, iY, iFounderOwner)
 end
 
 -- ---------------------------------------------------------------------------
+-- ④a-2 ★★★★★ 2026-10-07【真·崩溃根因：目标格上有单位】
+--
+--   用户实测（2026-10-07）：面板点「建立」→ 日志停在
+--       [CSF] [trace] IsValidFoundLocation -> true / ok
+--   紧接着游戏弹 `Unhandled Exception: EXCEPTION_ACCESS_VIOLATION
+--   Error reading address 0xc`。
+--
+--   根因链（三条一起才成立）：
+--     ① 面板传进来的坐标 = **建邦使节自己站的格子**（CSF_Panel 用 envoyX/envoyY）；
+--     ② `CSF_IsValidFoundLocation` **完全不检查单位**（只查水/山/冰/边界/领土/城市间距）；
+--     ③ 本文件里那段单位检查被 `if false then` **停用**了 —— 而且它写的是
+--        `if iPlayer ~= iMine`，**本来就会跳过建邦者自己的使节**。
+--   ⇒ `Cities:Create` 落在【有单位的格子】上 → 引擎踩空 → 崩 0xc。
+--
+--   对照证据（为什么我自己的验收从没崩过）：我走的是 `CSF_FindFoundLocation` 的
+--   坐标，那个函数把【所有单位的所在格 + 周围 2 圈】全列为禁区；而面板走的是
+--   使节自己的格子，只过 `CSF_IsValidFoundLocation`。两条路差的就是"单位"这一项。
+--   另外本文件 2155 行的注释早就写过崩因是"有主 / 有城 / **单位密集**"。
+--
+--   ⚠️ 粒度很关键：只查【目标格本身】，**不要查半径 2**。
+--      历史上查半径 2 会把使节自己算进去 → 永远拒绝（用户报 unsafe_plot）；
+--      而完全不查 → 崩。目标格 + 包含建邦者自己的单位 = 正确粒度。
+-- ---------------------------------------------------------------------------
+-- ⚠️ 前向声明：`CSF_EnsureUnitFreeTarget` 里要用它，但它的定义在下面（④b）。
+--    不声明的话这里会解析成**全局变量**（nil）→ 运行时报 "attempt to call a nil value"。
+local CSF_FindFoundLocation;
+
+local function CSF_TargetPlotHasUnit(iX, iY)
+    if iX == nil or iY == nil then return false end;
+    local bHas = false;
+    local function scan(tIDs)
+        CSF_Safe(function()
+            for _, iPlayer in ipairs(tIDs) do
+                local pP = Players[iPlayer];
+                if pP ~= nil then
+                    local pUnits = CSF_Safe(function() return pP:GetUnits() end);
+                    if pUnits ~= nil then
+                        pcall(function()
+                            for _, pUnit in pUnits:Members() do
+                                local ux = CSF_Safe(function() return pUnit:GetX() end);
+                                local uy = CSF_Safe(function() return pUnit:GetY() end);
+                                if ux == iX and uy == iY then bHas = true end
+                            end
+                        end);
+                    end
+                end
+            end
+        end);
+    end
+    scan(PlayerManager.GetAliveMajorIDs());
+    scan(PlayerManager.GetAliveMinorIDs());
+    return bHas;
+end
+
+--- 在目标格附近就近找一个「合法 + 没有单位」的格子（切比雪夫环，由近及远）。
+--  优先用这个而不是 CSF_FindFoundLocation（后者从地图中心向外找，可能跑到地图另一头）。
+--  @return iX, iY —— 找不到返回 -1, -1
+local function CSF_FindNearbyFreePlot(iX, iY, iFounderOwner, iMaxR)
+    if iX == nil or iY == nil then return -1, -1 end;
+    for r = 1, (iMaxR or 3) do
+        for dy = -r, r do
+            for dx = -r, r do
+                if math.max(math.abs(dx), math.abs(dy)) == r then
+                    local nx, ny = iX + dx, iY + dy;
+                    local bOk = CSF_IsValidFoundLocation(nx, ny, iFounderOwner);
+                    if bOk == true and not CSF_TargetPlotHasUnit(nx, ny) then
+                        return nx, ny;
+                    end
+                end
+            end
+        end
+    end
+    return -1, -1;
+end
+
+--- ★ 统一入口：保证 (iX, iY) 是「合法 且 没有单位」的格子；否则就近换格。
+--  @return iX, iY, sWhy —— 失败时 iX = -1
+local function CSF_EnsureUnitFreeTarget(iX, iY, iFounderOwner, iTag)
+    local sTag = tostring(iTag or "target");
+    if not CSF_TargetPlotHasUnit(iX, iY) then
+        return iX, iY, "ok";
+    end
+    print("[CSF] " .. sTag .. ": ⚠️ 目标格 (" .. tostring(iX) .. "," .. tostring(iY) ..
+          ") 上有单位（通常是建邦使节自己）→ 就近换格");
+    local nx, ny = CSF_FindNearbyFreePlot(iX, iY, iFounderOwner, 3);
+    if nx > 0 then
+        print("[CSF] " .. sTag .. ": 就近改用 (" .. tostring(nx) .. "," .. tostring(ny) .. ")");
+        return nx, ny, "ok";
+    end
+    local okG, gx, gy = pcall(CSF_FindFoundLocation, iFounderOwner);
+    if okG and gx ~= nil and gx > 0 then
+        print("[CSF] " .. sTag .. ": 就近找不到 → 改用合格格 (" ..
+              tostring(gx) .. "," .. tostring(gy) .. ")");
+        return gx, gy, "ok";
+    end
+    print("[CSF] " .. sTag .. ": ⛔ 找不到「没有单位」的合格格，放弃（宁可不建也不崩）");
+    return -1, -1, "no_unit_free_plot";
+end
+
+-- ---------------------------------------------------------------------------
 -- ④b ⭐⭐ 全地图找一个可建邦的地块（**逐级放宽**）
 --
 --   为什么需要（2026-10-04 实测的真实可用性问题）：
@@ -332,7 +432,7 @@ end
 -- @param iFounderOwner  建邦者的玩家 ID（用于领土判断；可为 nil）
 -- @return iX, iY, sWhy  —— 失败时返回 -1, -1, 最后一次的拒绝原因
 -- ---------------------------------------------------------------------------
-local function CSF_FindFoundLocation(iFounderOwner)
+CSF_FindFoundLocation = function(iFounderOwner)
     local iW, iH = CSF_Safe2(function() return Map.GetGridSize() end);  -- ★ 必须用 Safe2，Safe 只返回一个值
     if iW == nil or iH == nil then return -1, -1, "no_map" end;
 
@@ -663,6 +763,18 @@ local function CSF_FoundCityState(iCityStateID, iX, iY, iUnitID, iOwnerID)
           " owner=" .. tostring(iOwnerID) .. ")");
     CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
     print("[CSF] [step] consume before Create done");
+
+    -- ★ 2026-10-07 追加：消耗完使节后**再确认格子真空了**（可能还叠着别人的单位）。
+    --   有残留就就近换格 —— 一格两个玩家的对象是引擎崩溃的直接原因。
+    do
+        local ux3, uy3, sWhy3 = CSF_EnsureUnitFreeTarget(iX, iY, iOwnerID, "found");
+        if ux3 > 0 then
+            iX, iY = ux3, uy3;
+        else
+            print("[CSF] [step] ⛔ " .. tostring(sWhy3));
+            return false, "no_unit_free_plot";
+        end
+    end
 
     -- ② 建城（核心 API）
     --    细粒度日志：万一崩在这儿，日志能精确到这一步（T-94 排查手段）
@@ -2145,6 +2257,33 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     end
                 end
 
+                -- ★★★★★ 2026-10-07【Create 前最后两道：先腾空这一格，再确认没单位】
+                --
+                --   ① **先把建邦使节消耗掉** —— 与 `CSF_FoundCityState`（本文件 754 行，
+                --      T-112）完全同一个道理，那条注释原话：
+                --        "关键顺序：先把建邦使节消耗掉，腾空这一格，再建城。
+                --         实测崩溃日志精确停在这里：`cities:Create(48,13)`（无 returned OK）。
+                --         原因：使节还站在那一格上，而我们要给城邦在同一格建城
+                --         → 一格同时有两个玩家的对象 → 引擎崩溃。"
+                --      这个修法**当时只加在了旧函数上，没搬到本分支** —— 所以用户
+                --      2026-10-07 用面板建邦时又崩了一次（`Error reading address 0xc`）。
+                --   ② 再确认格子真的空了（可能还叠着别人的单位）→ 没空就就近换格。
+                if bSafe then
+                    print("[CSF] slot-activate: consume envoy BEFORE Create (unitID=" ..
+                          tostring(iUnitID) .. " owner=" .. tostring(iOwnerID) .. ")");
+                    CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+                    local ux2, uy2, sWhyU = CSF_EnsureUnitFreeTarget(iX, iY, iOwnerID, "slot-activate");
+                    if ux2 > 0 then
+                        iX, iY = ux2, uy2;
+                    else
+                        bSafe = false;
+                        print("[CSF] slot-activate: ⛔ " .. tostring(sWhyU));
+                    end
+                end
+                if not bSafe then
+                    return false, "no_unit_free_plot", iSlot;
+                end
+
                 -- ★★★★★ 2026-10-06【最终方案】校验通过后，**直接用 Cities:Create 建城**
                 --
                 --   实测对照（同一局、同样激活成功）：
@@ -2184,7 +2323,8 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     print("[CSF] slot-activate: ❌ Create 未生效（引擎本回合已建过一个城邦）");
                 end
 
-                CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+                -- ★ 2026-10-07：使节已在 Create **之前**消耗掉了（必须先腾空格子，
+                --   否则一格两个玩家的对象 → 崩 0xc）。这里不再重复调用。
 
                 print("[CSF] slot-activate: 槽 " .. tostring(iSlot) ..
                       " 建邦完成（城市数 " .. tostring(iAfter) .. "）");
@@ -2269,6 +2409,22 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             end
         end
 
+        -- ★★★★★ 2026-10-07【Create 前最后两道：先腾空这一格，再确认没单位】
+        --   （与 slot-activate 分支、以及 CSF_FoundCityState T-112 完全同一个道理：
+        --     使节还站在目标格上就 Create → 一格两个玩家的对象 → 引擎崩 0xc）
+        if bSafeR then
+            print("[CSF] settle: consume envoy BEFORE Create (unitID=" ..
+                  tostring(iUnitID) .. " owner=" .. tostring(iOwnerID) .. ")");
+            CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+            local uxR, uyR, sWhyUR = CSF_EnsureUnitFreeTarget(iX, iY, iOwnerID, "settle");
+            if uxR > 0 then
+                iX, iY = uxR, uyR;
+            else
+                bSafeR = false;
+                print("[CSF] settle: ⛔ " .. tostring(sWhyUR));
+            end
+        end
+
         local iAfterR = 0;
         if bSafeR then
             local bCr = pcall(function() Players[iReuse]:GetCities():Create(iX, iY) end);
@@ -2290,8 +2446,7 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             return false, "settler_failed", iReuse, true;
         end
 
-        -- 消耗掉用来建邦的「建邦使节」
-        CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+        -- ★ 2026-10-07：使节已在 Create **之前**消耗掉了（同上，必须先腾空格子）。
 
         print("[CSF] settle: 城邦 " .. tostring(iReuse) ..
               " 建邦完成（城市数 " .. tostring(iAfterR) .. "）");
