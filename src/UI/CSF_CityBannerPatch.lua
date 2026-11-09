@@ -26,10 +26,40 @@
 -- ===========================================================================
 
 include("CSF_UICommon");
+include("CSF_CopyRegistry");
 
 if CSF_CityBannerManager_BaseLoaded ~= true then
     CSF_CityBannerManager_BaseLoaded = true;
     include("CityBannerManager");
+end
+
+local CSF_BaseCityBannerUpdateName = CityBanner.UpdateName;
+
+-- 副本需要在原生横幅上显示可区分的名字。先跑官方 UpdateName 保留
+-- tooltip/Resize/信息刷新，再只改显示文本；内部 CivilizationType/Leader 仍保持原版身份。
+function CityBanner:UpdateName()
+    if CSF_BaseCityBannerUpdateName ~= nil then
+        CSF_BaseCityBannerUpdateName(self);
+    end
+    if self.m_Type ~= BANNERTYPE_CITY_CENTER or self.m_Instance == nil
+       or self.m_Instance.CityName == nil then return end
+    local pCity = nil;
+    pcall(function() pCity = self:GetCity() end);
+    if pCity == nil then return end
+    local owner = nil;
+    pcall(function() owner = pCity:GetOwner() end);
+    local baseName = nil;
+    pcall(function() baseName = pCity:GetName() end);
+    local localized = nil;
+    pcall(function() localized = Locale.Lookup(baseName) end);
+    if localized == nil then localized = baseName end
+    local suffix = CSF_GetCopySuffix(owner);
+    local shown = CSF_ApplyCopySuffix(localized, owner);
+    if suffix ~= nil and suffix ~= "" and shown ~= nil then
+        self.m_Instance.CityName:SetText(Locale.ToUpper(shown));
+        self.m_Instance.CityBannerButton:SetToolTipString(shown);
+        pcall(function() self:Resize() end);
+    end
 end
 
 -- 取色统一走 CSF_UICommon.lua 的 CSF_SafePlayerColors（保证非 nil）。

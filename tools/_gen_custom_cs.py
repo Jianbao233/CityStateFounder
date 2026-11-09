@@ -87,10 +87,11 @@ def gen_gameplay_sql():
         L.append("INSERT OR IGNORE INTO Leaders (LeaderType, Name, InheritFrom) VALUES "
                  "('%s', 'LOC_CSF_CS_%s_LEADER', '%s');" % (leader(n), n, INHERIT[cat]))
     L.append("")
-    L.append("-- ⑦ ★★ LeaderTraits：能力 —— 【2 个城邦一组共用同一个官方 Trait】")
-    L.append("--    这就是「能力重复但名字不同」：不同文明/领袖，同一个 Trait")
+    L.append("-- ⑦ 类别能力由 InheritFrom 继承，不在子领袖重复挂同一 Trait。")
+    L.append("-- 原生继承会按声明分别实例化；重复声明会让1/3/6使者加成翻倍。")
+    L.append("-- 仅清理本 MOD 六个子领袖的已继承类别 Trait，保留官方/其它扩展能力。")
     for n, cn, en, trait, cat, col, icon in CITY_STATES:
-        L.append("INSERT OR IGNORE INTO LeaderTraits (LeaderType, TraitType) VALUES ('%s', '%s');" % (leader(n), trait))
+        L.append("DELETE FROM LeaderTraits WHERE LeaderType='%s' AND TraitType='%s';" % (leader(n), trait))
     L.append("")
     return "\n".join(L)
 
@@ -210,8 +211,8 @@ def main():
     print("  城邦数: %d（%d 组共享能力）" % (len(CITY_STATES), len(CITY_STATES) // 2))
     print("  玩法库: Types %d + TypeProperties %d + Civilizations %d + CivilizationLeaders %d"
           % (len(CITY_STATES) * 2, len(CITY_STATES), len(CITY_STATES), len(CITY_STATES)))
-    print("          + CityNames %d + Leaders %d + LeaderTraits %d"
-          % (len(CITY_STATES), len(CITY_STATES), len(CITY_STATES)))
+    print("          + CityNames %d + Leaders %d（类别 Trait 仅继承，不重复声明）"
+          % (len(CITY_STATES), len(CITY_STATES)))
     print("  配置库: CityStates %d 条（3 域）+ PlayerColors %d 条"
           % (len(CITY_STATES) * 3, len(CITY_STATES)))
 

@@ -29,6 +29,72 @@
 
 include("CSF_CopyRegistry");
 
+-- 捕获引擎接口，避免 CityStates 私有 UI 适配层回调本函数时递归。
+local CSF_NativeGetPlayerColors = UI.GetPlayerColors;
+local CSF_NativeGetPlayerColorValues = UI.GetPlayerColorValues;
+
+-- Runtime GameCore configuration and the frontend configuration are separate
+-- objects. A zero-opening closed slot is empty in the frontend even after
+-- native registration. Use official setters on the real frontend objects;
+-- do not replace PlayerConfigurations getters or manufacture HasMet/envoys.
+function CSF_SynchronizeFoundedIdentities()
+    local api = ExposedMembers and ExposedMembers.CSF;
+    local getter = api and (api.GetPublishedIdentities or api.GetFoundedIdentities);
+    if getter == nil then return true; end
+    local ok, rows = pcall(getter);
+    if not ok or type(rows) ~= "table" then return false; end
+    local colorsChanged = false;
+    local colorsMissing = false;
+    for _, row in ipairs(rows) do
+        if type(row.PlayerID) ~= "number" or row.PlayerID < 0 or row.PlayerID >= 62 or
+           type(row.Civ) ~= "string" or type(row.Leader) ~= "string" then return false; end
+        local success, consistent = pcall(function()
+            local cfg = PlayerConfigurations[row.PlayerID];
+            if cfg:GetLeaderTypeName() ~= row.Leader then cfg:SetLeaderTypeName(row.Leader); end
+            if cfg:GetCivilizationTypeName() ~= row.Civ then cfg:SetCivilizationTypeName(row.Civ); end
+            if type(row.ShortName) == "string" then
+                if cfg:GetCivilizationShortDescription() ~= row.ShortName then cfg:SetValue("CIVILIZATION_SHORT_DESCRIPTION", row.ShortName); end
+                if cfg:GetCivilizationDescription() ~= row.Description then cfg:SetValue("CIVILIZATION_DESCRIPTION", row.Description); end
+                if cfg:GetValue("CIVILIZATION_ADJECTIVE") ~= row.Adjective then cfg:SetValue("CIVILIZATION_ADJECTIVE", row.Adjective); end
+                if cfg:GetLeaderName() ~= row.ShortName then cfg:SetLeaderName(row.ShortName); end
+                if cfg:GetCivilizationShortDescription() ~= row.ShortName or cfg:GetCivilizationDescription() ~= row.Description then return false; end
+            end
+            -- Native setters 0x16B1B0 / 0x169CD0 use these exact keys;
+            -- the static key initializer is 0x001F20 in the pinned XP2 core.
+            local level = CivilizationLevelTypes.CIVILIZATION_LEVEL_CITY_STATE;
+            if cfg:GetCivilizationLevelTypeID() ~= level then
+                cfg:SetValue("CIVILIZATION_LEVEL_TYPE_NAME", "CIVILIZATION_LEVEL_CITY_STATE");
+                cfg:SetValue("CIVILIZATION_LEVEL_TYPE_ID", level);
+            end
+            if cfg:GetSlotStatus() ~= SlotStatus.SS_COMPUTER then cfg:SetSlotStatus(SlotStatus.SS_COMPUTER); end
+            if type(row.Color) == "number" and cfg:GetValue("PLAYER_COLOR_TYPE") ~= row.Color then
+                cfg:SetValue("PLAYER_COLOR_TYPE", row.Color);
+                if cfg:GetValue("PLAYER_COLOR_TYPE") ~= row.Color then return false; end
+                colorsChanged = true;
+            end
+            if type(row.Color) == "number" then
+                local back, front = CSF_NativeGetPlayerColors(row.PlayerID);
+                if back == nil or front == nil then colorsMissing = true; end
+            end
+            return cfg:GetCivilizationTypeName() == row.Civ and
+                   cfg:GetLeaderTypeName() == row.Leader and cfg:GetCivilizationLevelTypeID() == level and
+                   cfg:GetSlotStatus() == SlotStatus.SS_COMPUTER;
+        end);
+        if not success or not consistent then return false; end
+    end
+    if colorsChanged or colorsMissing then
+        local rebuilt = pcall(function() UI.RefreshColorSet(); UI.RebuildColorDB(); end);
+        if not rebuilt then return false; end
+    end
+    for _, row in ipairs(rows) do
+        if type(row.Color) == "number" then
+            local success, back, front = pcall(CSF_NativeGetPlayerColors, row.PlayerID);
+            if not success or back == nil or front == nil then return false; end
+        end
+    end
+    return true;
+end
+
 --- 安全取某个玩家的 (primaryColor, secondaryColor)；**保证非 nil**。
 function CSF_SafePlayerColors(playerID)
     if playerID == nil then
@@ -37,7 +103,7 @@ function CSF_SafePlayerColors(playerID)
 
     -- ① 正常路径
     local backColor, frontColor = nil, nil;
-    pcall(function() backColor, frontColor = UI.GetPlayerColors(playerID) end);
+    pcall(function() backColor, frontColor = CSF_NativeGetPlayerColors(playerID) end);
     if backColor ~= nil and frontColor ~= nil then
         return backColor, frontColor;
     end
@@ -59,7 +125,7 @@ function CSF_SafePlayerColors(playerID)
                 local b2, f2 = nil, nil;
                 pcall(function()
                     if PlayerConfigurations[i]:GetCivilizationTypeName() == sCiv then
-                        b2, f2 = UI.GetPlayerColors(i);
+                        b2, f2 = CSF_NativeGetPlayerColors(i);
                     end
                 end);
                 if b2 ~= nil and f2 ~= nil then
@@ -70,7 +136,7 @@ function CSF_SafePlayerColors(playerID)
 
         -- ③ 该文明的官方配色（城邦统一返回城邦主色）
         local b3, f3 = nil, nil;
-        pcall(function() b3, f3 = UI.GetPlayerColorValues(sCiv, 0) end);
+        pcall(function() b3, f3 = CSF_NativeGetPlayerColorValues(sCiv, 0) end);
         if b3 ~= nil then
             if f3 == nil then f3 = b3 end;
             return b3, f3;
@@ -81,4 +147,5 @@ function CSF_SafePlayerColors(playerID)
     return 0xFF202020, 0xFFC0C0C0;
 end
 
+CSF_SynchronizeFoundedIdentities();
 print("[CSF] CSF_UICommon.lua loaded（安全取色 CSF_SafePlayerColors）");

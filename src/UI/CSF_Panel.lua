@@ -8,10 +8,8 @@
 --   为什么不列全池：预留城邦的身份在地图生成时就固定了，运行时改不了（T-65）
 --
 -- 架构约束：
---   - 建城在 GameCore（ExposedMembers.CSF.FoundCityState）
---   - 「缔造者优势 +1 使者」必须在本 UI 上下文做，因为要用
---     UI.RequestPlayerOperation + PlayerOperations.GIVE_INFLUENCE_TOKEN
---     （依据 Base/Assets/UI/PartialScreens/CityStates.lua:755-760）
+--   - 原生 EXECUTE_SCRIPT 将建邦请求交给 Gameplay 入队，界面不直接修改世界。
+--   - ExposedMembers 用于读取目录和结果；额外使者与能力由 Gameplay 验证。
 -- ===========================================================================
 
 include("InstanceManager");
@@ -22,6 +20,7 @@ include("InstanceManager");
 --      显示/隐藏逻辑一起替换掉，结果是"不崩但旗标不显示"（已踩两次）。
 --   顺序：先 CopyRegistry（提供 CSF_GetCopySource），再 BannerColorFix。
 include("CSF_CopyRegistry");
+include("CSF_UICommon");
 
 print("[CSF] CSF_Panel.lua loading (InGame context)");
 
@@ -41,6 +40,8 @@ local g_CSFHint        = nil;    -- 面板的提示 Label（结果回传时更�
 local m_bWaiting       = false;  -- 已下单、等待 GameCore 执行结果
 local m_iSeenSeq       = nil;    -- 已处理过的结果序号（轮询兜底去重用）
 local m_bHandled       = false;  -- 本次下单的结果是否已处理（两条通道去重，防止重复给使者）
+local m_iPendingRequestID = nil; -- 只处理当前请求，不能把历史结果认作本次结果
+local m_iClientRequestSeq = 0;
 
 -- ---------------------------------------------------------------------------
 -- ⭐ 接收 GameCore 的建邦结果（跨 VM 通信）
@@ -58,10 +59,10 @@ local function CSF_RegisterResultListener()
         return;
     end
     local ok = pcall(function()
-        GameEvents.CSF_FoundResult.Add(function(bOk, sReason, iCsPlayer, iX, iY)
+        GameEvents.CSF_FoundResult.Add(function(bOk, sReason, iCsPlayer, iX, iY, iRequestID, iOwnerID)
             print("[CSF] GameEvents.CSF_FoundResult: ok=" .. tostring(bOk) ..
                   " reason=" .. tostring(sReason) .. " player=" .. tostring(iCsPlayer));
-            CSF_OnFoundResult(bOk, sReason, iCsPlayer);
+            CSF_OnFoundResult(bOk, sReason, iCsPlayer, iRequestID, iOwnerID);
         end);
     end);
     if ok then
@@ -129,6 +130,9 @@ function CSF_Close()
     m_iTargetY       = nil;
     m_iTargetUnitID  = nil;
     m_iTargetOwnerID = nil;
+    m_bWaiting = false;
+    m_iPendingRequestID = nil;
+    Controls.CSFConfirmButton:SetDisabled(false);
 end
 
 -- ---------------------------------------------------------------------------
@@ -150,6 +154,8 @@ function CSF_Open()
     g_CSFHint  = Controls.CSFHint;    -- 记住提示 Label，供结果回传时更新
     m_bWaiting = false;
     m_bHandled = false;              -- 每次打开面板重置去重标记
+    m_iPendingRequestID = nil;
+    Controls.CSFConfirmButton:SetDisabled(false);
     CSF_Refresh();
 end
 
@@ -184,22 +190,36 @@ function CSF_Refresh()
     --
     --   2026-10-06 更新：现在有**两条**可用路径，都要列：
     --     · "reuse" —— 本局已有同文明休眠玩家 → 直接复用
-    --     · "slot"  —— ★ 该文明有【自己的未激活预注册槽】→ 激活它
-    --                  引擎开局把全部 54 个城邦文明都预注册成槽（status=5），
-    --                  所以这条路能建**全部 54 个里的任意一个**，且【不改文明】→ 不崩。
+    --     · "slot"  —— 该文明有自己的未激活预注册槽 → 激活它。
+    --     · "register" —— 按本次请求在空槽登记身份；不增加开局城邦数。
+    --     · "copy"   —— 原版已在场时，使用另一个干净预注册槽复制同文明身份；
+    --                  建城前后都要按目标格城市归属复查，不能以放移民代替成功。
     --
     --   仍然不列 "retarget" / "dynamic" / "unavailable"：
     --   前者改文明（实测挂起），后者是半成品 —— 列出来却点不了只会让人困惑。
     local tList = {};
     for _, kEntry in ipairs(tAll) do
-        if kEntry.Mode == "reuse" or kEntry.Mode == "slot" then
+        if kEntry.Mode == "reuse" or kEntry.Mode == "slot" or kEntry.Mode == "register" or kEntry.Mode == "copy" then
             tList[#tList + 1] = kEntry;
         end
     end
     m_kDormant = tList;
 
     if #tList == 0 then
-        Controls.CSFHint:SetText(CSF_Loc("LOC_CSF_PANEL_NO_POOL"));
+        -- 只有【所有候选项都明确报告 no_free_slot】才说容量耗尽；
+        -- native_unavailable / nil 等缺桥或未知原因不能冒充容量耗尽。
+        local bAllNoSlot = #tAll > 0;
+        for _, kEntry in ipairs(tAll) do
+            if kEntry.UnavailableReason ~= "no_free_slot" then
+                bAllNoSlot = false;
+                break;
+            end
+        end
+        if bAllNoSlot then
+            Controls.CSFHint:SetText(CSF_Loc("LOC_CSF_REASON_NO_SLOT"));
+        else
+            Controls.CSFHint:SetText(CSF_Loc("LOC_CSF_PANEL_NO_POOL"));
+        end
         return;
     end
     -- ⭐ 先检查【当前位置能不能建】，让玩家点之前就知道（避免白点一次）
@@ -214,35 +234,35 @@ function CSF_Refresh()
         end
     end
 
-    -- 提示里带上"可用 / 本局总数"，让玩家知道还能不能更多
-    --   ⭐ 面板【只列本局真实存在的城邦】——因为只有它们能被引擎正确创建。
-    --   ⚠️⚠️ 这里必须用【本局城邦数】，不能用【城邦池大小】（T-145 修正）：
-    --      池子固定 48 个（Expansion2CityStates 域），而本局只有开局设置的数量
-    --      （标准 12 / 巨大 18）。曾经误用池子大小 → 显示"本局共 48 个城邦"，
-    --      玩家会以为有 48 个可用，实际只能建 7 个，非常困惑。
-    local iGameTotal = #tAll;    -- 兜底：拿不到统计时退回旧行为
+    -- 提示里带上"可选种类 / 场上实际城邦数"，让玩家知道还能不能更多
+    --   ⭐ 第一个数是【候选种类数】，不是槽位数；同一种可以重复建立。
+    --   ⚠️ 场上数量必须用 active（真实有城），不能用 total（含隔离无城），
+    --      也不能用池大小（48 是数据池，不是本局城邦数）。
+    local iGameActive = nil;
     local fStats = (ExposedMembers ~= nil and ExposedMembers.CSF ~= nil)
                    and ExposedMembers.CSF.GetGameCityStateStats or nil;
     if fStats ~= nil then
         local okS, kStats = pcall(fStats);
-        if okS and type(kStats) == "table" and kStats.total ~= nil then
-            iGameTotal = kStats.total;
-            print("[CSF] panel: 本局城邦统计 total=" .. tostring(kStats.total) ..
+        if okS and type(kStats) == "table" and type(kStats.active) == "number" and kStats.active >= 0 then
+            iGameActive = kStats.active;
+            print("[CSF] panel: 本局城邦统计 active=" .. tostring(kStats.active) ..
+                  " total=" .. tostring(kStats.total) ..
                   " dormant=" .. tostring(kStats.dormant) ..
-                  " active=" .. tostring(kStats.active) ..
                   " pending=" .. tostring(kStats.pending) ..
                   " pool=" .. tostring(kStats.pool));
         end
     end
+    local sActiveText = (iGameActive ~= nil) and tostring(iGameActive)
+                        or CSF_Loc("LOC_CSF_PANEL_COUNT_UNKNOWN");
 
     Controls.CSFHint:SetText(
         CSF_Loc("LOC_CSF_PANEL_HINT") .. "[NEWLINE]" ..
         CSF_Loc("LOC_CSF_PANEL_COUNT_PRE") .. " " .. tostring(#tList) .. " " ..
-        CSF_Loc("LOC_CSF_PANEL_COUNT_MID") .. " " .. tostring(iGameTotal) .. " " ..
+        CSF_Loc("LOC_CSF_PANEL_COUNT_MID") .. " " .. sActiveText .. " " ..
         CSF_Loc("LOC_CSF_PANEL_COUNT_SUF") ..
         (sSpotMsg ~= "" and ("[NEWLINE]" .. sSpotMsg) or ""));
-    print("[CSF] panel: 本局可用城邦 " .. tostring(#tList) ..
-          " 个（本局城邦共 " .. tostring(iGameTotal) .. " 个）");
+    print("[CSF] panel: 本局可选城邦种类 " .. tostring(#tList) ..
+          " 个（本局场上城邦 active " .. tostring(iGameActive) .. " 个）");
 
     local iReusable = 0;
     for _, kEntry in ipairs(tList) do
@@ -252,7 +272,7 @@ function CSF_Refresh()
         kInst.CSFEntryName:SetText(CSF_Loc(kEntry.Name));
         kInst.CSFEntryCategory:SetText(CSF_CategoryLoc(kEntry.Category));
 
-        -- 能列出来的都是 reuse（机制完整），不再需要角标
+        -- reuse / slot / copy 都要求完整机制，显示统一不加技术角标
         iReusable = iReusable + 1;
         kInst.CSFEntryStatus:SetText("");
 
@@ -265,8 +285,8 @@ function CSF_Refresh()
         end);
     end
 
-    print("[CSF] panel: " .. tostring(#tList) .. " 个可选城邦，其中 " ..
-          tostring(iReusable) .. " 个本局已有休眠玩家（机制完整）");
+    print("[CSF] panel: " .. tostring(#tList) .. " 个可选城邦；" ..
+          tostring(iReusable) .. " 个通过可用路径筛选，实际结果待建邦验收");
 
     Controls.CSFCityStateStack:CalculateSize();
     Controls.CSFCityStateScroll:CalculateSize();
@@ -292,19 +312,7 @@ end
 -- 缔造者优势：给建立者 1 个使者
 --   依据 Base/Assets/UI/PartialScreens/CityStates.lua:755-760
 -- ---------------------------------------------------------------------------
-local function CSF_GiveFounderEnvoy(iCityStatePlayerID)
-    local iLocal = CSF_Safe(function() return Game.GetLocalPlayer() end);
-    if iLocal == nil or iLocal < 0 then return false end
-
-    local kParams = {};
-    kParams[PlayerOperations.PARAM_PLAYER_ONE] = iCityStatePlayerID;
-
-    local bOk = pcall(function()
-        UI.RequestPlayerOperation(iLocal, PlayerOperations.GIVE_INFLUENCE_TOKEN, kParams);
-    end);
-    print("[CSF] founder envoy -> city-state " .. tostring(iCityStatePlayerID) .. " ok=" .. tostring(bOk));
-    return bOk;
-end
+-- 接触和奖励由 Gameplay 完成并读回；UI 不再支出现有使者。
 
 -- ---------------------------------------------------------------------------
 -- 确认建立
@@ -317,6 +325,7 @@ end
 --    → 所以 UI 只把请求交给 GameCore 排队，由 GameCore 在游戏事件里执行。
 -- ---------------------------------------------------------------------------
 function CSF_OnConfirm()
+    if m_bWaiting then return end; -- 双击不能排入两次相同的建城请求
     if m_sSelectedCiv == nil then
         print("[CSF] 未选择城邦");
         return;
@@ -329,35 +338,42 @@ function CSF_OnConfirm()
     local iUnitID  = m_iTargetUnitID;
     local iOwnerID = m_iTargetOwnerID;
 
-    -- 【只下单，不执行】—— 队列由 GameCore 在游戏事件里消费
-    local fReq = (ExposedMembers ~= nil and ExposedMembers.CSF ~= nil)
-                 and ExposedMembers.CSF.RequestFound or nil;
-    if fReq == nil then
-        print("[CSF] RequestFound 不可用");
+    if iOwnerID ~= Game.GetLocalPlayer() or UI.RequestPlayerOperation == nil or
+       PlayerOperations == nil or PlayerOperations.EXECUTE_SCRIPT == nil then
+        print("[CSF] 原生建邦请求通道或本地玩家无效");
         return;
     end
-
-    local bQueued = fReq(m_sSelectedCiv, iX, iY, iUnitID, iOwnerID);
-    if bQueued ~= true then
-        print("[CSF] 下单失败");
-        Controls.CSFHint:SetText(CSF_Loc("LOC_CSF_PANEL_INVALID_LOCATION"));
-        return;
-    end
-
-    print("[CSF] 已下单：" .. tostring(m_sSelectedCiv) .. " @(" ..
-          tostring(iX) .. "," .. tostring(iY) .. ")，等待 GameCore 处理");
-    -- ⚠️ 不要立刻关面板：执行是【延后】的，关了就没地方显示结果了。
-    --    显示"处理中"，等 GameEvents.CSF_FoundResult 回来再关（见 CSF_OnFoundResult）。
+    local previous = Game:GetProperty("CSF_SyncSequence_" .. tostring(iOwnerID)) or 0;
+    m_iClientRequestSeq = math.max(m_iClientRequestSeq,previous) + 1;
+    local iRequestID = m_iClientRequestSeq;
+    -- Mark pending before dispatch: a fast native callback may complete during
+    -- the request. Never overwrite its completed state after returning.
     Controls.CSFHint:SetText(CSF_Loc("LOC_CSF_PANEL_PENDING"));
     g_CSFHint = Controls.CSFHint;
+    m_bHandled = false; -- 失败后留在同一面板重试，也必须允许处理新结果
+    m_iPendingRequestID = iRequestID;
     m_bWaiting = true;
+    Controls.CSFConfirmButton:SetDisabled(true);
+    local ok, queued = pcall(UI.RequestPlayerOperation,iOwnerID,PlayerOperations.EXECUTE_SCRIPT,
+        {OnStart="CSF_FoundRequest",CSF_Civ=m_sSelectedCiv,CSF_X=iX,CSF_Y=iY,
+         CSF_UnitID=iUnitID,CSF_RequestID=iRequestID});
+    if not ok or queued ~= true then
+        m_bWaiting=false; m_iPendingRequestID=nil;
+        Controls.CSFConfirmButton:SetDisabled(false);
+        Controls.CSFHint:SetText(CSF_Loc("LOC_CSF_PANEL_INVALID_LOCATION"));
+        print("[CSF] 原生下单未确认");
+    end
 end
 
 -- 接收 GameCore 的执行结果（跨 VM：GameCore 用 GameEvents 广播）
 --
 -- ⚠️ 结果有【两条通道】：GameEvents 广播 + UI 轮询兜底（因为某些上下文里 GameEvents 为 nil）。
 --    两条都可能触发 → 必须去重，否则 `CSF_GiveFounderEnvoy` 会**重复给使者**。
-function CSF_OnFoundResult(bOk, sReason, iCsPlayer)
+function CSF_OnFoundResult(bOk, sReason, iCsPlayer, iRequestID, iOwnerID)
+    if not m_bWaiting or m_iPendingRequestID == nil or
+       iRequestID ~= m_iPendingRequestID or iOwnerID ~= m_iTargetOwnerID then
+        return; -- 包括 seq=0/none、前一请求的迟到结果和其他玩家的广播
+    end
     if m_bHandled then
         print("[CSF] 结果已处理过，忽略重复回调: ok=" .. tostring(bOk) ..
               " reason=" .. tostring(sReason));
@@ -365,11 +381,14 @@ function CSF_OnFoundResult(bOk, sReason, iCsPlayer)
     end
     m_bHandled = true;
     m_bWaiting = false;
+    m_iPendingRequestID = nil;
+    Controls.CSFConfirmButton:SetDisabled(false);
     print("[CSF] 建邦结果: ok=" .. tostring(bOk) .. " reason=" .. tostring(sReason) ..
           " player=" .. tostring(iCsPlayer));
     if bOk == true then
-        if iCsPlayer ~= nil and iCsPlayer >= 0 then
-            CSF_GiveFounderEnvoy(iCsPlayer);
+        if CSF_SynchronizeFoundedIdentities ~= nil and not CSF_SynchronizeFoundedIdentities() then
+            if g_CSFHint then g_CSFHint:SetText(CSF_ReasonText("founding_ui_identity_unconfirmed")); end
+            return;
         end
         print("[CSF] 城邦已建立，player=" .. tostring(iCsPlayer));
         CSF_Close();
@@ -384,6 +403,20 @@ end
 
 -- 错误码 → 玩家可读文本
 function CSF_ReasonText(sReason)
+    if sReason == "copy_city_name_unavailable" then
+        return "该城邦缺少可用的城市名称，尚未创建副本。";
+    end
+    if sReason == "copy_city_name_unconfirmed" then
+        return "副本城市已创建，但真实名称未确认。请勿重复建城；需检查已有副本。";
+    end
+    if sReason == "founding_legacy_record_unconfirmed" then
+        -- 旧记录缺 StockBefore：不能在发奖前证明库存基线，已停止发奖。
+        -- 绝不能套用下面“城市已创建”的通用文案。
+        return CSF_Loc("LOC_CSF_REASON_LEGACY_RECORD");
+    end
+    if type(sReason) == "string" and sReason:sub(1, 9) == "founding_" then
+        return "城邦城市已创建，但身份、AI、城防、接触或使者初始化未确认。请勿重复建城；需检查建邦记录。";
+    end
     local kMap = {
         bad_args          = "LOC_CSF_REASON_BAD_ARGS",
         no_plot           = "LOC_CSF_REASON_NO_PLOT",
@@ -399,6 +432,10 @@ function CSF_ReasonText(sReason)
         no_worldbuilder   = "LOC_CSF_REASON_NO_WB",
         silent_fail       = "LOC_CSF_REASON_SILENT",
         create_threw      = "LOC_CSF_REASON_CREATE_THREW",
+        copy_create_threw = "LOC_CSF_REASON_CREATE_THREW",
+        copy_create_silent_fail = "LOC_CSF_REASON_SILENT",
+        snapshot_inconsistent = "LOC_CSF_REASON_SILENT",
+        color_copy_failed = "LOC_CSF_REASON_SILENT",
         dynamic_disabled  = "LOC_CSF_REASON_DISABLED",
         threw             = "LOC_CSF_REASON_THREW",
     };
@@ -453,13 +490,14 @@ function CSF_Initialize()
             local fGet = (ExposedMembers ~= nil and ExposedMembers.CSF ~= nil)
                          and ExposedMembers.CSF.GetLastResult or nil;
             if fGet == nil then return end
-            local ok, iSeq, bOk, sReason, iCs = pcall(fGet);
+            local ok, iSeq, bOk, sReason, iCs, iX, iY, iRequestID, iOwnerID = pcall(fGet,m_iTargetOwnerID);
             if not ok or iSeq == nil then return end
-            if m_iSeenSeq == nil or iSeq > m_iSeenSeq then
+            if iRequestID == m_iPendingRequestID and iOwnerID == m_iTargetOwnerID and
+               (m_iSeenSeq == nil or iSeq > m_iSeenSeq) then
                 m_iSeenSeq = iSeq;
                 print("[CSF] 轮询到新结果: seq=" .. tostring(iSeq) ..
                       " ok=" .. tostring(bOk) .. " reason=" .. tostring(sReason));
-                CSF_OnFoundResult(bOk, sReason, iCs);
+                CSF_OnFoundResult(bOk, sReason, iCs, iRequestID, iOwnerID);
             end
         end);
     end);
@@ -509,10 +547,69 @@ function CSF_Initialize()
             end
             return true;
         end
+        -- ⭐⭐⭐ 实验热键 Ctrl+Shift+R（临时，2026-10-11）：
+        --   验证 UI.RefreshColorSet() + UI.RebuildColorDB() 能否为
+        --   "游戏中途激活的城邦槽"生成 UI 颜色表项。测完删除本段与下面的函数。
+        if uiKey == Keys.VK_R and pInputStruct:IsControlDown() and pInputStruct:IsShiftDown() then
+            if type(CSF_EXP_ColorRefreshTest) == "function" then
+                CSF_EXP_ColorRefreshTest();
+            else
+                print("[CSF_EXP] CSF_EXP_ColorRefreshTest 未定义 —— 实验代码没加载？");
+            end
+            return true;
+        end
         return false;
     end, true);
 
     print("[CSF] CSF_Panel initialized（面板入口：建邦使节动作 / 热键 Ctrl+E）");
+end
+
+-- ===========================================================================
+-- ⭐⭐⭐ 实验（临时，2026-10-11）：UI 颜色表刷新测试
+--   问题：UI.GetPlayerColors(playerID) 对"游戏中途激活的城邦槽"返回 nil。
+--         该表在【开局 / 读档时构建一次并缓存】，之后不再刷新。
+--   假设：官方 API UI.RefreshColorSet() + UI.RebuildColorDB() 能重建它。
+--   依据（Firaxis 自己写的注释，逐字）：
+--     DLC/BarbarianClansMode/UI/Replacements/CityBannerManager_BarbarianClansMode.lua:239-253
+--       -- Colors are normally assigned during game loading/startup and cached.
+--       -- Adding a new city during gameplay requires invalidating and rebuilding that cache.
+--       -- This was also a problem with WorldBuilder Advanced Mode so these exposures already existed.
+--       UI.RefreshColorSet();
+--       UI.RebuildColorDB();
+--   用法：游戏里按 Ctrl+Shift+R，看 Lua.log 里 grep [CSF_EXP]。
+--   测完：删除本段函数与输入处理器里的那段热键。
+-- ===========================================================================
+local function CSF_EXP_ColorSnapshot()
+    local t = {};
+    for i = 0, 63 do
+        local ok, p, s = pcall(UI.GetPlayerColors, i);
+        if ok and p ~= nil then
+            t[#t + 1] = i .. "=(" .. tostring(p) .. "," .. tostring(s) .. ")";
+        end
+    end
+    if #t == 0 then return "<0..63 全部 nil>"; end
+    return table.concat(t, " ");
+end
+
+function CSF_EXP_ColorRefreshTest()
+    print("[CSF_EXP] ===== 颜色表刷新测试 开始 =====");
+    print("[CSF_EXP] BEFORE 有颜色的槽: " .. CSF_EXP_ColorSnapshot());
+
+    local ok1, e1 = pcall(UI.RefreshColorSet);
+    print("[CSF_EXP] UI.RefreshColorSet()  ok=" .. tostring(ok1) .. " err=" .. tostring(e1));
+
+    local ok2, e2 = pcall(UI.RebuildColorDB);
+    print("[CSF_EXP] UI.RebuildColorDB()   ok=" .. tostring(ok2) .. " err=" .. tostring(e2));
+
+    print("[CSF_EXP] AFTER  有颜色的槽: " .. CSF_EXP_ColorSnapshot());
+
+    for i = 0, 63 do
+        local ok, p, s = pcall(UI.GetPlayerColors, i);
+        if ok and p ~= nil then
+            print(string.format("[CSF_EXP] slot %d primary=%s secondary=%s", i, tostring(p), tostring(s)));
+        end
+    end
+    print("[CSF_EXP] ===== 颜色表刷新测试 结束 =====");
 end
 
 ContextPtr:SetInitHandler(CSF_Initialize);

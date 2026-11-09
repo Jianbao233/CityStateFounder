@@ -17,12 +17,16 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "src"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--src", type=Path, default=Path(__file__).resolve().parent.parent / "src",
+                    help="Use the staged package to audit generated DLLs alongside source files")
+SRC = parser.parse_args().src
 
 ok_n = warn_n = err_n = 0
 
@@ -178,6 +182,12 @@ VENDORED = {
     #   官方自己有两处 local 先用后定义（control / s，分属不同作用域），
     #   是上游既有写法，不是我们的问题。
     "GameSetupLogic.lua",
+    # 官方的开局设置界面（AdvancedSetup.lua）：实验用整份拷贝，
+    #   唯一改动是 HostGame() 里加了一段"host 前改写引擎城邦创建数"。
+    #   官方自己有多处 local 名字出现在【行尾注释】里（例如
+    #   `g_kMapData = {};  -- Global set of map data;` 里的 data），
+    #   属于上游既有写法 + 本审计器的已知误报类，不是我们的问题。
+    "AdvancedSetup.lua",
 }
 
 for lua_p in sorted(SRC.rglob("*.lua")):
@@ -192,14 +202,14 @@ for lua_p in sorted(SRC.rglob("*.lua")):
             for a in m.group(1).split(","):
                 a = a.strip()
                 if a:
-                    param_names.add(a)
+                    param_names.add(a.split(":", 1)[0].strip())
         # for <vars> in / for <var> = ...
         m = re.match(r"\s*for\s+(.+?)\s+(?:in|=)", ln)
         if m:
             for a in m.group(1).split(","):
                 a = a.strip()
                 if a:
-                    param_names.add(a)
+                    param_names.add(a.split(":", 1)[0].strip())
 
     defs: dict[str, int] = {}
     for i, ln in enumerate(lines, 1):
@@ -209,10 +219,12 @@ for lua_p in sorted(SRC.rglob("*.lua")):
             continue
         # local a = ...  /  local a, b, c = ...   ← 必须支持多变量，
         # 否则 `local sCiv, bAlive = nil, nil;` 会被漏掉，导致同名 local 被误报。
-        m2 = re.match(r"\s*local\s+([A-Za-z_0-9,\s]+?)\s*=", ln)
+        # Civ6 的类型标注也是声明，不是首次使用；否则不同函数中的
+        # local backColor:number 会被漏掉，误认为使用了后面函数的同名 local。
+        m2 = re.match(r"\s*local\s+([A-Za-z_0-9,:\s]+?)\s*=", ln)
         if m2:
             for nm in m2.group(1).split(","):
-                nm = nm.strip()
+                nm = nm.split(":", 1)[0].strip()
                 if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", nm or ""):
                     defs.setdefault(nm, i)
 
@@ -225,7 +237,18 @@ for lua_p in sorted(SRC.rglob("*.lua")):
                 continue
             if ln.strip().startswith("--"):
                 continue
-            if re.search(r"\b" + re.escape(name) + r"\b", ln):
+            # 去掉【行尾注释】再匹配 —— 否则注释里的英文单词会被当成标识符。
+            # 实测踩到：官方 AdvancedSetup.lua 的
+            #   `g_kMapData = {};	-- Global set of map data; ...`
+            # 里注释中的 "data" 被误报成"使用了尚未定义的 local 'data'"
+            # （与日志字符串里的 "by" 被误报同类）。去掉注释只会【减少】匹配，
+            # 不会制造新的误报，方向是安全的。
+            # Strings and member names are not lexical variable reads:
+            # "city", math.floor and cfg.leader cannot reference a later
+            # local city/floor/leader. This remains a heuristic, not a parser.
+            ln_code = re.sub(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'", "", ln)
+            ln_code = re.split(r"--", ln_code, maxsplit=1)[0]
+            if re.search(r"(?<![A-Za-z_0-9.:])" + re.escape(name) + r"\b", ln_code):
                 if lua_p.name in VENDORED:
                     # 上游既有问题，不算我们的 —— 单独提示，不计 ERR
                     warn(f"{lua_p.name}:{i} 上游既有的 local 先用后定义 '{name}'"
@@ -236,12 +259,6 @@ for lua_p in sorted(SRC.rglob("*.lua")):
                 break
     if bad == 0:
         ok(f"{lua_p.name}: {len(defs)} 个 local 的定义/使用顺序正确")
-
-# --- 汇总 -----------------------------------------------------------------
-print("\n" + "=" * 72)
-print(f"汇总：OK {ok_n} · WARN {warn_n} · ERR {err_n}")
-print("=" * 72)
-sys.exit(1 if err_n else 0)
 
 # --- 10. Lua 版本兼容：goto 是 Lua 5.2 才有的，Civ6 是 5.1 ---
 print("\n[6] Lua 5.1 兼容性（goto 不可用）")
@@ -256,3 +273,8 @@ for lua_p in sorted(SRC.rglob("*.lua")):
             _goto_bad += 1
 if _goto_bad == 0:
     ok("所有 Lua 文件都没有 goto（Lua 5.1 兼容）")
+# --- 汇总 -----------------------------------------------------------------
+print("\n" + "=" * 72)
+print(f"汇总：OK {ok_n} · WARN {warn_n} · ERR {err_n}")
+print("=" * 72)
+sys.exit(1 if err_n else 0)

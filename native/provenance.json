@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-28",
+  "basis": "C6FW MIT; local working tree, preserve original proxy baseline",
+  "upstream_loader": "PVPCore/vendor/Civ6DllLoader shared frozen WINMM 1.0.2 candidate",
+  "redistribution": "User confirmed author permission in this conversation 2026-10-28",
+  "sources": {
+    "src\\lua\\lua_bridge.cpp": "e0c2d1c9bd01397f7e7849e49eca7f25c003130f60f9763fdcf4a8e8eb935403",
+    "src\\lua\\csf_player_snapshot.h": "dec57f59aa850a7ec9ddb9142fff2b67d01f2f787005a1a17355f652b34f43af",
+    "src\\lua\\csf_alive_lists.h": "d2902ac380e4f29e3e70336abbc54357a34edd6f6a3f73dc8f8b338a50802e33",
+    "LICENSE": "c99a83c3493c0403eeb5297ae25d3327c340e8c2ec0b9d83dbeb2633e1f50f67"
+  },
+  "HookAPI.h": {
+    "sha256": "e03028ba3e489a0ee2517a6c78499d73d4b2743b6c2b2e89dfa27a3485dfa9f3",
+    "origin": "sociometry/Civ6DllLoader/common/HookAPI.h",
+    "permission": "User confirmed author redistribution permission 2026-10-28"
+  },
+  "current_adaptation": {
+    "date": "2026-11-06",
+    "version": "1.1.2",
+    "game_build": 26407122,
+    "loader_version": "1.0.6 CCB compatibility fork",
+    "loader_source_report_sha256": "83c01e88f5c176280d245750f80a95e9c8f22b47c3c1c95334bb5de4ea52fc1f",
+    "upstream_uninstall": "ca570c8a2ffca800f8462aedc04af9ad7142747f",
+    "supported_xp2_sha256": [
+      "324c51e9ea3531758842e16c69e6cddbefbb226c5b675c3d6e60111646c2e98c",
+      "092abfbb2176f8df04b5212f819dc269dd83aea866ff05aaf489904a1ff7c41f"
+    ],
+    "evidence": "build/acceptance/20261106-build26407122/actual-pe-verification.json",
+    "runtime_game": "USER_CONFIRMED_20261109",
+    "loader_baseline": {
+      "toolkit_version": "2.0.40-beta",
+      "toolkit_mod_version": 240,
+      "runtime": "WINMM/format2/1.0.6",
+      "files_sha256": {
+        "Binaries/Win64/GameCore_XP2_Shell_FinalRelease.dll": "e207bc3070f14b8bc26fb04df4a2eda9803e6525b8ce5bff2373a65eb6384acc",
+        "Binaries/Win64/Civ6DllLoader.winmm.runtime.dll": "1d26e90118d8f7faec0a7f5dfbf1d2696809a8095093b2ccaca2d07ba75b44e7"
+      }
+    },
+    "accepted_payload": {
+      "date": "2026-11-09",
+      "scope": "User confirmed usable in game. Local logs corroborate v1.1.2 OnLoad, exact XP2 pin and successful Muscat duplicate founding. Individual save/reload and multiplayer results were not reported for this build.",
+      "plugin_sha256": "bae696aaff76f67f04c63906ffca0bd87d55fe211ce61e24c02e6327cc0310dc",
+      "build_manifest_sha256": "eb66be9fcd417ee7798a6bc0dfc1e76265b83d6a94b8014cf4aa2fa8b51fc1bf",
+      "archive_sha256": "87b43954f903f3323865cfc8f927f9d94f66ed6cd730c8595451cd8dcc6bec3f"
+    }
+  }
+}

@@ -2,10 +2,10 @@
 <GameData>
   <LocalizedText>
     <Replace Tag="LOC_CSF_MOD_NAME" Language="zh_Hans_CN">
-      <Text>城邦缔造者 v1.0.2</Text>
+      <Text>城邦缔造者 v1.1.2</Text>
     </Replace>
     <Replace Tag="LOC_CSF_MOD_NAME" Language="en_US">
-      <Text>City-State Founder v1.0.2</Text>
+      <Text>City-State Founder v1.1.2</Text>
     </Replace>
     <Replace Tag="LOC_CSF_MOD_DESCRIPTION" Language="zh_Hans_CN">
       <Text>新增「建邦使节」单位：它不能建立普通城市，而是建立一个城邦。配套面板会列出本局可用的城邦（图标 / 名称 / 宗主加成）供你选择。</Text>
@@ -50,28 +50,34 @@
       <Text>Choose a City-State to Found</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_HINT" Language="zh_Hans_CN">
-      <Text>选择一个城邦，它将在使节所在位置诞生。列表只显示本局可用的城邦。</Text>
+      <Text>选择一个城邦，它将在使节所在位置诞生。候选可重复建立，不会改变开局城邦数量。</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_HINT" Language="en_US">
-      <Text>Select a City-State to found at the Envoy's location. Only City-States present in this game are listed.</Text>
+      <Text>Choose a City-State to found at the Envoy's location. The same candidate can be founded again; this does not change the starting City-State count.</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_PRE" Language="zh_Hans_CN">
-      <Text>本局可建</Text>
+      <Text>可选</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_PRE" Language="en_US">
-      <Text>Available:</Text>
+      <Text>Candidates</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_MID" Language="zh_Hans_CN">
-      <Text>个 · 本局共</Text>
+      <Text>种 · 场上已有</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_MID" Language="en_US">
-      <Text>of</Text>
+      <Text>types · founded</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_SUF" Language="zh_Hans_CN">
-      <Text>个城邦（本局数量由开局设置决定。想要更多可选：在【高级设置 → 城邦选择器】里勾选更大的候选池，再把城邦数量调高）</Text>
+      <Text>个城邦（同一种可重复建立；开局城邦数量不变）</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_COUNT_SUF" Language="en_US">
-      <Text>City-States in this game (set in game setup. For more choice, open Advanced Setup, use the City-State Picker to select a larger pool, then raise the City-State count)</Text>
+      <Text>City-States (the same candidate can be founded again; starting count unchanged)</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_UNKNOWN" Language="zh_Hans_CN">
+      <Text>未知</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_PANEL_COUNT_UNKNOWN" Language="en_US">
+      <Text>unknown</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_CONFIRM" Language="zh_Hans_CN">
       <Text>建立</Text>
@@ -158,10 +164,10 @@
       <Text>Not enough surrounding land to found a city here.</Text>
     </Replace>
     <Replace Tag="LOC_CSF_REASON_NO_SLOT" Language="zh_Hans_CN">
-      <Text>本局可用于建邦的休眠城邦名额已用完（每局约 8 个）。</Text>
+      <Text>本局可用的城邦槽位已全部占用，无法再建立。</Text>
     </Replace>
     <Replace Tag="LOC_CSF_REASON_NO_SLOT" Language="en_US">
-      <Text>No dormant City-State slots left this game (about 8 per game).</Text>
+      <Text>All available City-State slots are in use; no more can be founded.</Text>
     </Replace>
     <Replace Tag="LOC_CSF_REASON_NO_LEADER" Language="zh_Hans_CN">
       <Text>查不到该城邦的领袖，无法建立。</Text>
@@ -199,6 +205,12 @@
     <Replace Tag="LOC_CSF_REASON_THREW" Language="en_US">
       <Text>An error occurred (safely aborted).</Text>
     </Replace>
+    <Replace Tag="LOC_CSF_REASON_LEGACY_RECORD" Language="zh_Hans_CN">
+      <Text>历史建邦奖励记录不完整，已停止发奖。请保留此存档并检查建邦记录，不要重复建城。</Text>
+    </Replace>
+    <Replace Tag="LOC_CSF_REASON_LEGACY_RECORD" Language="en_US">
+      <Text>The historical founding reward record is incomplete, so rewards have been stopped. Keep this save and check the founding record; do not found again.</Text>
+    </Replace>
     <Replace Tag="LOC_CSF_REASON_BAD_ARGS" Language="zh_Hans_CN">
       <Text>参数不完整。</Text>
     </Replace>
@@ -224,10 +236,10 @@
       <Text>Cannot found a City-State here (too close to another city, or invalid terrain).</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_NO_POOL" Language="zh_Hans_CN">
-      <Text>当前没有休眠中的城邦可供建立。</Text>
+      <Text>当前没有可建立的城邦。</Text>
     </Replace>
     <Replace Tag="LOC_CSF_PANEL_NO_POOL" Language="en_US">
-      <Text>No dormant City-States are available to found.</Text>
+      <Text>No City-State can be founded right now.</Text>
     </Replace>
     <Replace Tag="LOC_CSF_SUFFIX_2" Language="zh_Hans_CN">
       <Text> II</Text>

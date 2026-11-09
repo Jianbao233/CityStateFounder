@@ -1,3 +1,7 @@
+-- DEPRECATED / UNREGISTERED as of source v1.0.5. Historical statements below.
+-- Native consumers use DuplicateCivilizations as exclusion aliases, not permission.
+-- Self-pairs do not enable duplicate players; do not register this legacy file.
+-- The old explanatory comments below are historical and have been superseded.
 -- 自动生成：官方城邦的「自我共存」登记（DuplicateCivilizations）
 --
 -- 语义：DuplicateCivilizations 表示「这两个文明可以共存」。

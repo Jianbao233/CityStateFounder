@@ -88,10 +88,17 @@ def main() -> int:
     for r in civs:
         print(f"     {r[0]:26} {r[1]:34} {r[2]}")
 
-    traits = list(conn.execute(
-        "SELECT LeaderType, TraitType FROM LeaderTraits "
-        "WHERE LeaderType LIKE 'LEADER_MINOR_CIV_CSF_CS_%' ORDER BY LeaderType"))
-    print(f"   能力挂载: {len(traits)} 条")
+    traits = list(conn.execute('''
+        WITH RECURSIVE chain(Root, LeaderType, Depth) AS (
+          SELECT LeaderType, LeaderType, 0 FROM Leaders WHERE LeaderType LIKE 'LEADER_MINOR_CIV_CSF_CS_%'
+          UNION ALL
+          SELECT c.Root, l.InheritFrom, c.Depth+1 FROM chain c JOIN Leaders l ON l.LeaderType=c.LeaderType
+          WHERE l.InheritFrom IS NOT NULL AND c.Depth<32
+        )
+        SELECT c.Root,t.TraitType FROM chain c JOIN LeaderTraits t ON t.LeaderType=c.LeaderType
+        ORDER BY c.Root,t.TraitType
+    '''))
+    print(f"   能力挂载（含原生继承）: {len(traits)} 条")
     from collections import Counter
     cnt = Counter(t for _, t in traits)
     for t, n in cnt.items():
@@ -109,6 +116,9 @@ def main() -> int:
     print(f"   别名登记:   {dup_n} 条")
 
     problems = []
+    repeated = [f"{leader}:{trait} x{count}" for (leader, trait), count in Counter(traits).items() if count > 1]
+    if repeated:
+        problems.append("同一领袖重复继承/声明 Trait：" + "; ".join(repeated))
     if len(civs) != 6:
         problems.append(f"文明数应为 6，实为 {len(civs)}")
     if types_n != 12:

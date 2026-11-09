@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Mod id="DE55664B-313E-451F-9488-23F168359B9D" version="1.0.2">
+<Mod id="DE55664B-313E-451F-9488-23F168359B9D" version="112">
   <Properties>
     <Name>LOC_CSF_MOD_NAME</Name>
     <Description>LOC_CSF_MOD_DESCRIPTION</Description>
     <Teaser>LOC_CSF_MOD_TEASER</Teaser>
-    <Authors>Jianbao</Authors>
+    <Authors>@Bilibili我叫煎包</Authors>
     <CompatibleVersions>1.2,2.0</CompatibleVersions>
+    <SupportsMultiplayer>1</SupportsMultiplayer>
   </Properties>
 
   <!-- ⚠️⚠️ 必须有这个块！
@@ -17,16 +18,16 @@
          CCB 系列的 <Name> 直接写明文，所以它们不需要。） -->
   <LocalizedText>
     <Text id="LOC_CSF_MOD_NAME">
-      <en_US>City-State Founder v1.0.2</en_US>
-      <zh_Hans_CN>城邦缔造者 v1.0.2</zh_Hans_CN>
+      <en_US>City-State Founder v1.1.2</en_US>
+      <zh_Hans_CN>城邦缔造者 v1.1.2</zh_Hans_CN>
     </Text>
     <Text id="LOC_CSF_MOD_TEASER">
       <en_US>Found City-States wherever you want.</en_US>
       <zh_Hans_CN>随心所欲建建邦</zh_Hans_CN>
     </Text>
     <Text id="LOC_CSF_MOD_DESCRIPTION">
-      <en_US>Adds the City-State Envoy unit. It cannot found a normal city - instead it summons a City-State that is not yet present on the map, right where it stands. A panel lists the City-States available in this game (icon / name / suzerain bonus) for you to choose from.</en_US>
-      <zh_Hans_CN>新增「建邦使节」单位：不可建立普通城市，使用后原地召唤一个场上不存在的城邦。配套面板会列出本局可用的城邦（图标 / 名称 / 宗主加成）供你选择。</zh_Hans_CN>
+      <en_US>Adds the City-State Envoy unit and a selection panel to found an independent City-State on a valid tile. Supports candidates absent at game start and separate copies of the same City-State without changing the starting count. Includes the shared native DLL Loader and a Windows Gathering Storm plugin. First use installs its runtime and requires a restart. Do not combine with legacy GameCore replacements. Independent multiplayer is not yet verified.</en_US>
+      <zh_Hans_CN>新增「建邦使节」及选择面板，在合法位置建立独立城邦；支持开局未出现的城邦及同文明副本，不改变开局城邦数量。内置公共 DLL 加载器及 Windows 风云变幻插件，首次安装运行时后需要重启；勿与旧式 GameCore 替换模组混用；独立双端联机尚未验收。</zh_Hans_CN>
     </Text>
   </LocalizedText>
 
@@ -37,6 +38,12 @@
   </ActionCriteria>
 
   <FrontEndActions>
+    <!-- Same mod-contained core route as GhostFix. Existing IG components
+         keep CSF in multiplayer Target Mods. No official file modification. -->
+    <UpdateDatabase id="CSF_Bundled_GameCore">
+      <Properties><LoadOrder>90</LoadOrder></Properties>
+      <File>Config/CSF_GameCores.sql</File>
+    </UpdateDatabase>
     <UpdateText id="CSF_Text_FE">
       <File>Text/CSF_Text.xml</File>
     </UpdateText>
@@ -103,6 +110,25 @@
     <UpdateText id="CSF_CustomCityStates_Text_FE">
       <File>Text/CSF_CustomCityStates_Text.xml</File>
     </UpdateText>
+
+    <!-- ⛔ 【已整块移除，2026-10-15】"开局硬写 CITY_STATE_COUNT = 48" 实验的注册
+         原来的三处注册（现在都不存在了）：
+           ① ReplaceUIScript id="CSF_EXP_REPLACE_ADVANCEDSETUP"
+              （LoadOrder 201000 / LuaContext=AdvancedSetup / LuaReplace=FrontEnd/UI/AdvancedSetup/AdvancedSetup.lua）
+           ② ImportFiles id="CSF_EXP_IMPORT_ADVANCEDSETUP"（LoadOrder 201010）
+           ③ 顶层 Files 里的一条 File 条目（路径 FrontEnd/UI/AdvancedSetup/AdvancedSetup.lua）
+
+         移除原因：该实验在 HostGame() 之前用 GameConfiguration.SetValue 把
+                   CITY_STATE_COUNT 硬写成 48，于是【玩家在高级设置里设的开局城邦数量
+                   被 mod 改掉】。而"玩家设置的开局在场城邦数量完全不受 mod 影响"
+                   是硬需求 —— 这条路径必须不存在，不是把数字调小或调成 100%。
+
+         历史源文件 FrontEnd/UI/AdvancedSetup/AdvancedSetup.lua 【保留在 src 里】供追溯，
+         但它已不再被任何 action 引用、也不再列进顶层 Files
+         → 【不进 VFS，运行包绝不可能加载它】。
+         ⚠️ 不要以任何形式把它注册回来（包括"只 ImportFiles 不 Replace"）。
+
+         注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。 -->
   </FrontEndActions>
 
   <InGameActions>
@@ -126,15 +152,8 @@
          数据模型依据：实机数据库反查（docs/DLL版_调研设计与计划.md 附录 E）。
          SQL 由 tools/_gen_custom_cs.py 生成，加城邦改那个脚本即可。
          LoadOrder 取高值，确保晚于其它 mod 的城邦改动。 -->
-    <!-- ⭐ 城邦"自我共存"登记（2026-10-04）：让【同一个城邦能被复制多份】
-         DuplicateCivilizations 语义 = 两者可共存。官方 54 个城邦原本全都没有登记，
-         复制它们会让引擎崩溃（实测：造副本后点下一回合，游戏原生崩溃）。
-         本文件给每个城邦加一行 (X, X)。
-
-         ⭐ 2026-10-04 更新：自制城邦已【重新上架】，并按官方级写法补全了
-            TypeProperties / CityStates / PlayerColors / 选择器参数
-            （参考工坊 3591345334「Modder群友城邦小合集」）。
-            现在面板「类型」不再是 unknownType，旗标也有颜色。 -->
+    <!-- Custom civilizations are independent database entries, not proof
+         that runtime cloning of the original civilization works. -->
     <UpdateDatabase id="CSF_CustomCityStates" criteria="CSF_XP2">
       <Properties>
         <LoadOrder>2100000</LoadOrder>
@@ -150,15 +169,15 @@
       </Properties>
       <File>Data/CSF_CityStateColors.sql</File>
     </UpdateDatabase>
-    <UpdateDatabase id="CSF_DuplicateCityStates" criteria="CSF_XP2">
-      <Properties>
-        <LoadOrder>2100001</LoadOrder>
-      </Properties>
-      <File>Data/CSF_DuplicateCityStates.sql</File>
-    </UpdateDatabase>
+    <!-- v1.0.5: removed the legacy duplicate self-pair registration.
+         Native consumers use this relation for exclusion, not permission.
+         Keep the old source as history; do not load the research SQL. -->
 
     <UpdateText id="CSF_Text_IG" criteria="CSF_XP2">
       <File>Text/CSF_Text.xml</File>
+    </UpdateText>
+    <UpdateText id="CSF_CustomCityStates_Text_IG" criteria="CSF_XP2">
+      <File>Text/CSF_CustomCityStates_Text.xml</File>
     </UpdateText>
 
     <!-- ⭐ 单位图标（复用开拓者的图）—— 必须同时注册在 InGame，
@@ -242,6 +261,13 @@
         <LuaReplace>UI/CSF_CityBannerPatch.lua</LuaReplace>
       </Properties>
     </ReplaceUIScript>
+    <ReplaceUIScript id="CSF_REPLACE_CITYSTATES">
+      <Properties>
+        <LoadOrder>500003</LoadOrder>
+        <LuaContext>CityStates</LuaContext>
+        <LuaReplace>UI/CSF_CityStatesPatch.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
     <!-- ⭐ 2026-10-07【单位旗标兜底】
          单位旗标同样走 UI.GetPlayerColors(playerID)，对中途激活的城邦返回 nil
          → SetColor(nil) → 原生层读 NULL+0xc 崩溃。城邦迟早会造单位，必须堵。
@@ -258,6 +284,7 @@
         <LoadOrder>1004</LoadOrder>
       </Properties>
       <Items>
+        <File>UI/CSF_CopyRegistry.lua</File>
         <File>UI/CSF_UICommon.lua</File>
         <File>UI/CSF_UnitFlagManager.lua</File>
       </Items>
@@ -270,33 +297,36 @@
         <File>UI/CSF_CityBannerPatch.lua</File>
       </Items>
     </ImportFiles>
-      <!-- ⭐⭐ CCB Maps 崩溃修复补丁（T-155）
-         覆盖 CCB Maps 的 Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua。
-         该文件【只有 CCB Maps / BBM 提供】，其他任何地图 mod 都不碰它，
-         所以覆盖它不会与别的地图 mod 冲突。
-         改动只有一处：给城邦出生点分配循环补上边界检查（原版没检查，
-         出生点用完时会索引 nil 直接崩掉地图生成）。
-         正常情况（数量在地图容量内）行为与原版完全一致。
+    <ImportFiles id="CSF_CITYSTATES_IMPORT">
+      <Properties>
+        <LoadOrder>1005</LoadOrder>
+      </Properties>
+      <Items>
+        <File>UI/CSF_CityStatesPatch.lua</File>
+      </Items>
+    </ImportFiles>
+    <!-- ⛔ 【已移除，2026-10-15】两条"整份覆盖 CCB Maps 出生点分配脚本"的 ImportFiles：
+           · CSF_CCB_FIX_SPAWN (LoadOrder 3000000) -> Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua
+           · CSF_CCB_FIX_RIVER (LoadOrder 3000001) -> Data/BBS Maps/Utility/BBM_CivilizationAssign.lua
+         （下面没有对应的真实标签了，这条注释只是删除记录。）
+
+         移除原因：这两条会把 CCB Maps 的出生点分配脚本【整份替换成 mod 自带副本】，
+                   等于由本 mod 决定地图的出生容量分配 —— 与
+                   "不影响普通官方开局数量"冲突，而且一旦 CCB Maps 更新就会覆盖掉它的新改动。
+
+         两个历史源文件仍保留在 src 里供追溯（Data/BBS Maps/Utility/），
+         但已不再被任何 action 引用、也不再列进顶层 Files
+         → 【不进 VFS，运行包绝不可能加载它们】。
+         ⚠️ 不要以任何形式把它们注册回来。
+
          注：本条注释刻意不写尖括号标签，否则会被静态审计器的正则误当成真实引用。 -->
-    <ImportFiles id="CSF_CCB_FIX_SPAWN">
-      <Properties>
-        <LoadOrder>3000000</LoadOrder>
-      </Properties>
-      <Items>
-        <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
-      </Items>
-    </ImportFiles>
-    <ImportFiles id="CSF_CCB_FIX_RIVER">
-      <Properties>
-        <LoadOrder>3000001</LoadOrder>
-      </Properties>
-      <Items>
-        <File>Data/BBS Maps/Utility/BBM_CivilizationAssign.lua</File>
-      </Items>
-    </ImportFiles>
   </InGameActions>
 
   <Files>
+    <File>Config/CSF_GameCores.sql</File>
+    <File>Binaries/Win64/GameCore_XP2_Shell_FinalRelease.dll</File>
+<File>Binaries/Win64/Civ6DllLoader.winmm.runtime.dll</File>
+<File>Binaries/Win64/Plugins/GameCore/CityStateFounder.dll</File>
     <File>Data/CSF_Icons.xml</File>
     <File>Data/CSF_MapSizes.sql</File>
     <!-- Data/CSF_MapSizes.xml 是【可选】的"提高城邦数量上限"方案（默认不启用）。
@@ -309,10 +339,13 @@
     <File>Data/CSF_CityStateCountRange.xml</File>
     <!-- ⚠️ 被 ImportFiles 覆盖的文件【必须】同时列在这里，否则不进 VFS。
          实测踩到过：只在 ImportFiles 里列、漏了 <Files> 时钩子静默失效。 -->
-    <File>Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua</File>
-    <File>Data/BBS Maps/Utility/BBM_CivilizationAssign.lua</File>
+    <!-- ⛔ 2026-10-15 从 VFS 摘除（源文件仍留在 src 里留档，只是不再被声明）：
+           · Data/BBS Maps/Utility/BBM_AssignStartingPlots.lua
+           · Data/BBS Maps/Utility/BBM_CivilizationAssign.lua
+           · FrontEnd/UI/AdvancedSetup/AdvancedSetup.lua
+         三者原本只为配合上面那些实验/覆盖用的 ImportFiles 与 ReplaceUIScript 才需要进 VFS；
+         那些注册已全部移除，所以这里也不再声明 —— 保证它们【永远不会被加载】。 -->
     <File>Data/CSF_Units.sql</File>
-    <File>Data/CSF_DuplicateCityStates.sql</File>
     <File>Data/CSF_CustomCityStates.sql</File>
     <File>Data/CSF_CityStatePicker.sql</File>
     <File>Data/CSF_CityStateColors.sql</File>
@@ -326,6 +359,7 @@
     <File>Lua/CSF_CreateCityState.lua</File>
     <File>UI/CSF_CopyRegistry.lua</File>
     <File>UI/CSF_CityBannerPatch.lua</File>
+    <File>UI/CSF_CityStatesPatch.lua</File>
     <File>UI/CSF_UICommon.lua</File>
     <File>UI/CSF_UnitFlagManager.lua</File>
   </Files>

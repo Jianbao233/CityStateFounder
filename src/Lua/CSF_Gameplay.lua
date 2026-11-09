@@ -10,10 +10,11 @@
 --   ⑤ 查询城邦池（供 UI 面板使用）
 --
 -- ⚠️ 架构约束：
---   - 「缔造者优势 +1 使者」不在这里做——它需要 UI.RequestPlayerOperation
---     （见 UI/CSF_Panel.lua）。GameCore 侧拿不到 PlayerOperations。
---   - UI 与 GameCore 是【两个 Lua VM】，LuaEvents/GameEvents 不跨 VM，
---     必须经 ExposedMembers 桥接。
+--   - 缔造者额外使者由 Gameplay 官方 GiveFreeTokenToPlayer 发放并读回；
+--     玩家库存不消费。UI.RequestPlayerOperation 只用于正常派遣等界面操作。
+--   - ExposedMembers 只连接本机 UI/Gameplay，不能据此宣称联机同步。
+--   - 原生玩家就绪通知注册领袖/文明及继承能力，实际 modifier 实例逐项验收；
+--     配置、城市、接触、名称或通知返回值均不能单独证明能力完整。
 --
 -- 依据（本项目实测）：
 --   T-62 休眠城邦可长期稳定存活（50 回合实测）
@@ -31,7 +32,8 @@ print("[CSF] CSF_Gameplay.lua loading (GameCore context)");
 --   ⚠️ 取值必须贴近【引擎自己的规则】，否则会出现"合法地形也建不了"：
 --      引擎的 `GlobalParameters.CITY_MIN_RANGE = 3`。
 --      实测教训（T-122）：我曾把它设成 6，导致用户在任何地方都被拒（`too_close`）。
---      这里取 **3**（与引擎一致），把"是否真的能建"交给引擎判断。
+--      3 是排除半径，中心距离必须 >3；2026-10-23 同局3格失败/4格成功。
+--      不改变全局规则，也不能在自动找地时把该半径降到1或2。
 local CSF_MIN_CITY_DISTANCE = 3;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -69,24 +71,14 @@ local CSF_ALLOW_OWN_TERRITORY = false;
 local CSF_ALLOW_RETARGET = false;
 
 -- ───────────────────────────────────────────────────────────────────────────
--- 【建副本】开关 —— 默认【开启】
---   目标文明本局【已被占用】时，再建一个"能力相同、名字不同"的城邦（名字加 " II"）。
---   手法来自 CCB MirrorMap；关键差别是我们必须【显式重新初始化】玩家，
---   否则引擎不会按新文明重建颜色/名字（这就是当年 CSF_ALLOW_RETARGET 出半成品的原因）。
+-- 【建副本】开关 —— 默认关闭，等待原生身份链实机验收
+--   目标文明本局【已被占用】时，在状态 5 的预注册休眠槽上写入同一文明/领袖，
+--   再由 C6FW 按官方氏族链注册玩家；名字由 UI 后缀区分，颜色由源城邦复制。
 --   详见下方 CSF_FoundCityStateCopy 的头注释。
 -- ───────────────────────────────────────────────────────────────────────────
--- ⛔⛔⛔ 2026-10-05：**默认关闭**（用户实测：每次执行都崩，读 NULL+0xb0）
---
---   为什么关：副本路径必须【改变玩家的文明】（把源城邦的文明/领袖设到另一个槽）。
---   实测结论（跨多轮）：
---     · 文明【不变】的路径（复用同文明休眠槽）→ **稳定**（第 5-6 轮验证过，能建城不崩）
---     · 文明【改变】的路径（副本 / 重定向）→ **必崩**
---   原因：改了文明的玩家，其文明/领袖/颜色/特性全部与引擎的预注册不一致，
---         引擎后续处理（UI 颜色表、AI、外交）时踩空。
---
---   要重新试验副本（仅在你明确要求时）：把下面这行改成 true。
---   注意：那会再次触发崩溃，且崩溃【无转储、无 WER 事件】，只能读弹窗。
-local CSF_ENABLE_COPY = false;
+-- 旧的 UninitializePlayer/AddPlayer/SetPlayerLeader 路线已废弃；它绕过了预注册槽
+-- 的原生容器，曾在回合推进时崩溃。新路线暂不自动启用，必须通过完整业务矩阵后再开。
+local CSF_ENABLE_COPY = true;
 
 -- 引擎内部的槽位状态枚举（**不是** Lua 的 SS_*）
 --   逆向依据：FUN_180617370 只在状态 ∈ {0,1,3} 时才真正初始化玩家；
@@ -125,6 +117,23 @@ local CSF_SLOT_AI = 1;
 --
 --   ⚠️ 依赖已修复的 DLL（player+0x83a 与子系统写回）；旧 DLL 会崩（NULL+0xb0）。
 local CSF_ENABLE_SLOT_ACTIVATION = true;
+
+-- ⛔ 【危险未完成路径 —— 永久关闭】AddPlayer 现造新玩家来当城邦（"dynamic" 模式）
+--
+--   为什么关：实测（T-144）用 pm:AddPlayer 新造的城邦
+--     ① UI.GetPlayerColors 返回 nil → 旗标渲染成白色 → 读 NULL+0xc 崩游戏；
+--     ② BetterCityStates 在 CityStates_MPT.lua:374 索引
+--        GameInfo.DiplomaticStates[diploStateID] 崩。
+--   上面这条"游戏中途新造玩家"的路子在引擎里没有可用的完整实现，
+--   所以连同 CSF_FoundCityStateByCiv 末尾的动态兜底整段一起停用。
+--
+--   ★ 2026-10-15：这条开关原来是【没有 local 定义的全局】——
+--     读的是 nil，行为上等于关着，但"关着"这件事看不出来：
+--        · L1673 的诊断会把 dynamic=nil 打出来，而不是 false；
+--        · 任何文件只要写一句同名全局赋值，这条危险路径就会被静默打开。
+--     现在显式声明成 local false → ①状态可见 ②外部无法打开。
+--   ⚠️ 要重新启用这条路径，必须先解决上面两个崩溃点，不要只是把 false 改成 true。
+local CSF_ENABLE_DYNAMIC_CREATION = false;
 
 -- 【数量上限】每个玩家最多同时拥有几个「建邦使节」
 --   -1 = 不限制（= 自然上限，即"能造多少就造多少"，按用户要求的默认值）
@@ -276,6 +285,9 @@ local function CSF_IsValidFoundLocation(iX, iY, iFounderOwner)
     CSF_Safe(function()
         for _, iPlayer in ipairs(PlayerManager.GetAliveMinorIDs()) do tPlayers[#tPlayers + 1] = iPlayer end
     end);
+    for _,iPlayer in ipairs({62,63}) do
+        if Players[iPlayer] ~= nil then tPlayers[#tPlayers+1]=iPlayer; end
+    end
 
     for _, iPlayer in ipairs(tPlayers) do
         local pP = Players[iPlayer];
@@ -295,7 +307,11 @@ local function CSF_IsValidFoundLocation(iX, iY, iFounderOwner)
                             local iDist = CSF_Safe(function()
                                 return Map.GetPlotDistance(iX, iY, iCX, iCY);
                             end);
-                            if iDist ~= nil and iDist < CSF_MIN_CITY_DISTANCE then
+                            local range = CSF_MIN_CITY_DISTANCE;
+                            if GameInfo.GlobalParameters and GameInfo.GlobalParameters.CITY_MIN_RANGE then
+                                range = tonumber(GameInfo.GlobalParameters.CITY_MIN_RANGE.Value) or range;
+                            end
+                            if iDist ~= nil and iDist <= range then
                                 bTooClose = true;
                             end
                         end
@@ -364,6 +380,7 @@ local function CSF_TargetPlotHasUnit(iX, iY)
     end
     scan(PlayerManager.GetAliveMajorIDs());
     scan(PlayerManager.GetAliveMinorIDs());
+    scan({62,63}); -- barbarians and Free Cities are not in major/minor lists
     return bHas;
 end
 
@@ -413,7 +430,7 @@ local function CSF_EnsureUnitFreeTarget(iX, iY, iFounderOwner, iTag)
 end
 
 -- ---------------------------------------------------------------------------
--- ④b ⭐⭐ 全地图找一个可建邦的地块（**逐级放宽**）
+-- ④b 全地图找合法且无单位的可建邦地块
 --
 --   为什么需要（2026-10-04 实测的真实可用性问题）：
 --     在地图拥挤的局面里，调用方自己按"地图中央 + 固定距离"搜索会**一格都找不到**，
@@ -421,11 +438,8 @@ end
 --         选中 CIVILIZATION_ANTANANARIVO / 目标格 (-1,-1) / ❌ 找不到地
 --     当时场上有 9 个城邦各自派了移民（虽然 cities 仍是 0），把"看起来空"的格子占掉了。
 --
---   策略（从最理想逐级放宽，任何一级成功就返回）：
---     第 1 轮：全地图 + 模组的完整校验（含最小间距）
---     第 2 轮：允许离城市更近（把 CSF_MIN_CITY_DISTANCE 临时降到 2）
---     第 3 轮：连"有主领土"也允许（临时打开 CSF_ALLOW_OWN_TERRITORY）
---     第 4 轮：只要不是水、不是山、不是地图边缘即可（最后兜底）
+--   只在完整校验下遍历；拥挤时明确找不到位置，不能临时降低引擎
+--   城市排除半径、开放有主领土或跳过合法性检查来返回虚假候选。
 --
 --   ⚠️ 全程 pcall 包住：任何一步失败只是少一个候选，不会中断搜索。
 --
@@ -485,6 +499,7 @@ CSF_FindFoundLocation = function(iFounderOwner)
     end
     collectUnits(PlayerManager.GetAliveMajorIDs());
     collectUnits(PlayerManager.GetAliveMinorIDs());
+    collectUnits({62,63});
     local nUnitPlots = 0;
     for _ in pairs(tUnitPlots) do nUnitPlots = nUnitPlots + 1 end;
     print("[CSF] 找地：已避开 " .. nUnitPlots .. " 个【有单位的】格子");
@@ -496,9 +511,6 @@ CSF_FindFoundLocation = function(iFounderOwner)
     local sLastWhy = "none";
     local tRounds = {
         { dist = iOldDist, owned = bOldOwned, strict = true  },   -- 第 1 轮：完整校验
-        { dist = 2,        owned = bOldOwned, strict = true  },   -- 第 2 轮：放宽间距
-        { dist = 1,        owned = true,      strict = true  },   -- 第 3 轮：允许有主领土
-        { dist = 1,        owned = true,      strict = false },   -- 第 4 轮：只查地形
     };
 
     for iRound, kR in ipairs(tRounds) do
@@ -646,6 +658,10 @@ local function CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID)
 
     local function AddCandidate(pUnit)
         if pUnit == nil then return end
+        local row = GameInfo.Units[pUnit:GetType()];
+        if row == nil or row.UnitType ~= "UNIT_CSF_ENVOY" or
+           pUnit:GetX() ~= iX or pUnit:GetY() ~= iY or
+           (iOwnerID ~= nil and pUnit:GetOwner() ~= iOwnerID) then return; end
         local iID = CSF_Safe(function() return pUnit:GetID() end);
         if iID ~= nil and tSeen[iID] then return end
         if iID ~= nil then tSeen[iID] = true end
@@ -659,9 +675,11 @@ local function CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID)
             print("[CSF] consume: found envoy by ID (owner=" .. tostring(iOwnerID) ..
                   " unit=" .. tostring(iUnitID) .. ")");
             AddCandidate(pDirect);
+            if #tToKill == 0 then return 0; end
         else
             print("[CSF] consume: GetUnit(" .. tostring(iOwnerID) .. "," ..
-                  tostring(iUnitID) .. ") = nil; 退回坐标扫描");
+                  tostring(iUnitID) .. ") = nil; 不替换消费其它单位");
+            return 0;
         end
     end
 
@@ -680,7 +698,7 @@ local function CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID)
                             local sType = CSF_Safe(function()
                                 return GameInfo.Units[pUnit:GetType()].UnitType;
                             end);
-                            if sType == "UNIT_CSF_ENVOY" and uX == iX and uY == iY then
+                            if (iOwnerID == nil or iMajor == iOwnerID) and sType == "UNIT_CSF_ENVOY" and uX == iX and uY == iY then
                                 AddCandidate(pUnit);
                             end
                         end
@@ -697,6 +715,44 @@ local function CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID)
     end
     print("[CSF] consume done, killed=" .. tostring(iKilled));
     return iKilled;
+end
+
+-- ---------------------------------------------------------------------------
+-- ②-a 【消除假成功】目标格取证：目标格上是不是【真的】出现了【属于该玩家】的城市？
+--
+--   为什么不能只看 `Players[id]:GetCities():GetCount()`：
+--     那个数包含该玩家【别处】的城市。如果它别处已经有城（引擎开局给过、
+--     上一次操作留下的、或该槽本来就是活的），"城市数 ≥ 1"立刻为真 ——
+--     于是"目标格根本没建出城"被当成成功报给面板。这就是假成功的根源。
+--
+--   三重取证（缺一不可）：
+--     ① 该玩家的城市容器里有城市（调用方传进来的 iCount ≥ 1）；
+--     ② 目标格上确实有城市对象（`Cities.GetCityInPlot(iX, iY)` 非 nil）；
+--     ③ 那座城市属于 iPlayerID（先看 `city:GetOwner()`；取不到就退一步，
+--        看它是不是 `Players[iPlayerID]:GetCities()` 的成员）。
+--
+--   返回 true 才算"目标位置确有新城市"。
+-- ---------------------------------------------------------------------------
+local function CSF_TargetPlotHasOwnCity(iX, iY, iPlayerID, iCount)
+    if iX == nil or iY == nil or iPlayerID == nil then return false end
+    if iCount ~= nil and iCount < 1 then return false end
+
+    local pCity = CSF_Safe(function() return Cities.GetCityInPlot(iX, iY) end);
+    if pCity == nil then return false end
+
+    local iOwner = CSF_Safe(function() return pCity:GetOwner() end);
+    if iOwner == iPlayerID then return true end
+
+    -- 兜底：GetOwner 在某些上下文里读不到 → 改成"它是不是这个城邦的城市列表成员"
+    local bMember = false;
+    CSF_Safe(function()
+        local pCities = Players[iPlayerID]:GetCities();
+        if pCities == nil then return end
+        for _, pC in pCities:Members() do
+            if pC == pCity then bMember = true end
+        end
+    end);
+    return bMember;
 end
 
 -- ---------------------------------------------------------------------------
@@ -790,8 +846,19 @@ local function CSF_FoundCityState(iCityStateID, iX, iY, iUnitID, iOwnerID)
 
     -- ③ 复查：Create 对非法地块【静默失败】——不报错但城市数不变
     local iAfter = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
-    if iAfter <= iBefore then
-        print("[CSF] Create silently failed (cities " .. tostring(iBefore) .. " -> " .. tostring(iAfter) .. ")");
+
+    -- ★★★★★ 2026-10-15【消除假成功】判据必须包含【目标格上确有属于它的新城市】。
+    --   `iAfter <= iBefore` 只看该玩家的城市【总数】。如果它【别处】已经有城
+    --   （引擎开局给过 / 上一次操作留下的 / 该槽本来就是活的），目标格什么都没
+    --   建出来时总数照样 ≥ 阈值 → 静默失败被当成成功。
+    --   取证细节见 CSF_TargetPlotHasOwnCity（三重：城市数、目标格有城、城属于它）。
+    local bCityAtTarget = CSF_TargetPlotHasOwnCity(iX, iY, iCityStateID, iAfter);
+    print("[CSF] [step] 目标格 (" .. tostring(iX) .. "," .. tostring(iY) ..
+          ") 上有该城邦的城市 = " .. tostring(bCityAtTarget));
+
+    if iAfter <= iBefore or not bCityAtTarget then
+        print("[CSF] Create silently failed (cities " .. tostring(iBefore) .. " -> " .. tostring(iAfter) ..
+              ", city_at_target=" .. tostring(bCityAtTarget) .. ")");
         -- ⚠️ 补偿：使节已经在上一步被消耗了，但城没建成。
         --    在这里【在同格重生一个使节】，避免玩家白白损失一个单位（T-116）。
         if iOwnerID ~= nil then
@@ -1041,7 +1108,62 @@ local CSF_EXTRA_DORMANT_COUNT = 0;
 --      已分配的位置冲突。**保持 false。**
 local CSF_EXTRA_SET_START_POS = false;
 
-local m_iLastFoundTurn = nil;     -- ★ 上一次成功建邦的回合（每回合限 1 个）
+-- ---------------------------------------------------------------------------
+-- ★ 存档属性（Game:GetProperty / Game:SetProperty）
+--   为什么这两件事不能用 local：
+--     ① 每回合建邦限流 —— local 只活在本次 Lua 会话里，存盘/读档后被重置，
+--        于是"读档 → 同一回合又能再建一个"，与"一回合只允许建一个"的语义不符；
+--     ② 失败隔离 —— "这个槽已经失败过、不能再当正常 reuse 提交"必须跟着存档走，
+--        否则读档后又会把它当正常目标捡起来再试一次。
+--   所以两者都改成存档属性，读档语义一致（不再只靠 local）。
+-- ---------------------------------------------------------------------------
+
+-- 上一次【成功】建邦的回合号；从没成功过 → nil
+local function CSF_GetLastFoundTurn()
+    local v = CSF_Safe(function() return Game:GetProperty("CSF_LastFoundTurn") end);
+    if type(v) == "number" then return v end
+    return nil;
+end
+
+-- 【只在成功之后调用】记下"本回合已经成功建过一个城邦"
+local function CSF_MarkFoundSuccess(iTurn)
+    if iTurn == nil then return end
+    pcall(function() Game:SetProperty("CSF_LastFoundTurn", iTurn) end);
+end
+
+-- 失败隔离：某个玩家槽在"已经动过手之后才失败"（槽已激活却没建出城、
+-- 使节已消耗、城邦被 Create 静默失败损坏…）→ 写一条存档属性。
+-- 后续所有"挑目标"的地方都必须跳过它，绝不能当正常 reuse/slot 再提交一次。
+--
+-- ⚠️ 这里【不做回滚】：禁止 SetAlive(0) / UninitializePlayer 去"撤销"一个
+--    已经激活/已经消耗过使节的半成品（历史实测正是这么搞才崩的），
+--    只留下一条【可见的】隔离记录。
+local function CSF_MarkIsolated(iPlayerID, sReason)
+    if type(iPlayerID) ~= "number" or iPlayerID < 0 then return end
+    pcall(function()
+        Game:SetProperty("CSF_IsolatedSlot_" .. tostring(iPlayerID), tostring(sReason));
+        local cfg=PlayerConfigurations[iPlayerID];
+        local civ=cfg and cfg:GetCivilizationTypeName();
+        local row=civ and GameInfo.Civilizations[civ];
+        if row and row.StartingCivilizationLevelType=="CIVILIZATION_LEVEL_CITY_STATE" then
+            Game:SetProperty("CSF_IsolatedIdentity_" .. tostring(iPlayerID),
+                {Civ=civ,Leader=cfg:GetLeaderTypeName()});
+        end
+    end);
+    print("[CSF] ⚠️ 隔离槽 " .. tostring(iPlayerID) .. "（原因：" .. tostring(sReason) ..
+          "）—— 本存档内不再把它当作正常建邦目标");
+end
+
+-- 返回隔离原因字符串；没被隔离 → nil
+local function CSF_IsolatedReason(iPlayerID)
+    if type(iPlayerID) ~= "number" or iPlayerID < 0 then return nil end
+    local v = CSF_Safe(function()
+        return Game:GetProperty("CSF_IsolatedSlot_" .. tostring(iPlayerID));
+    end);
+    if v == nil then return nil end
+    return tostring(v);
+end
+
 local m_tReserved = {};          -- 已预留的城邦 playerID 集合
 local m_tOrphan   = {};          -- 【动态创建后建城失败】留下的玩家：Civ -> playerID
                                  -- 下次建同一文明时复用它，避免反复 AddPlayer 累积孤儿
@@ -1368,15 +1490,36 @@ local function CSF_ReserveCityStates()
     return iDone;
 end
 
--- 读档 / 开局完成时执行（赶在第 1 回合城邦建城之前）
---   ⭐ 顺序：先按原版数量正常预留（地图保持原版外观），
---           再额外造一批休眠城邦（T-144，默认关闭）。
+-- ---------------------------------------------------------------------------
+-- ⛔ 开局 / 读档的「预留 + 额外造城邦」入口 —— 自 2026-10-15 起【明确无操作】
+-- ---------------------------------------------------------------------------
+-- 硬需求：玩家在高级设置里设的**开局在场城邦数量必须完全不受本 mod 影响**。
+--   原来这里在 LoadScreenClose 里做两件事，两件都属于"改动开局在场城邦数量"：
+--     ① CSF_ReserveCityStates()            —— 把一批开局城邦的玩家挪到地图外，
+--                                              等于减少开局在场数量；
+--     ② CSF_CreateExtraDormantCityStates() —— 额外 AddPlayer 造休眠城邦
+--                                              （T-144 已否决，常量恒为 0）。
+--   ⇒ 现在【两个都不跑】。
+--
+-- ⚠️ 这不是"把比例调成 100"那种隐性开关：下面这个事件处理器本身是空的，
+--    CSF_ReserveCityStates / CSF_CreateExtraDormantCityStates 【没有任何自动调用点】。
+--    两个函数本体仍保留在本文件里（供历史追溯 + 离线夹具显式调用），
+--    但它们只能被【显式手动】触发。同理 CSF_ForceReserve()（ExposedMembers 上仍导出）
+--    也只是一条手动调试入口，不会由开局或读档自动触发。
+--
+-- ⚠️ 危险未完成路径不得自动开启：不要把下面改回调用这两个函数。
 Events.LoadScreenClose.Add(function()
-    CSF_Safe(CSF_ReserveCityStates);
-    CSF_Safe(CSF_CreateExtraDormantCityStates);
+    -- Never create/reserve players here. Repair only MOD-founded cities
+    -- whose persisted founding record still identifies their actual owner.
+    local api = ExposedMembers and ExposedMembers.CSF;
+    if api and api.RestoreCityStateDefense then api.RestoreCityStateDefense(); end
+    if api and api.RestorePendingRequests then api.RestorePendingRequests(); end
 end);
 
 -- 兜底：预留城邦的单位若再溜回地图，立刻清掉（保持休眠）
+--   ⚠️ 2026-10-15：开局预留已停用，所以正常情况下 CSF_IsReserved 恒为 false，
+--      这一分支不会再因"开局隐藏"而触发；保留它只为兜住"副本流程失败后
+--      自己打的预留标记"（见 CSF_FoundCityStateCopy 的 settler_failed）。
 Events.UnitAddedToMap.Add(function(iPlayerID, iUnitID)
     if iPlayerID == nil then return end
 
@@ -1414,9 +1557,18 @@ Events.UnitAddedToMap.Add(function(iPlayerID, iUnitID)
     end
 end);
 
--- 供 UI 手动触发（调试用）
+-- ⛔ 【已停用，2026-10-15】开局预留/隐藏城邦的手动入口。
+--
+--   历史背景：原来这里 `return CSF_ReserveCityStates();` —— 那是"开局把一部分城邦
+--   预留到地图外"的实验（CSF_KEEP_ACTIVE_PERCENT 比例）。这条实验已经有明确的
+--   硬需求否决："玩家设置的开局在场城邦数量完全不受 mod 影响"。
+--   LoadScreenClose 的自动调用早已摘除，但这个函数【仍然导出在 ExposedMembers.CSF
+--   上】—— 任何脚本只要调一次就能改变开局城邦数量。所以现在把它改成明确无操作：
+--   不再调用 CSF_ReserveCityStates，只如实返回 false 和原因码（面板/探针能显示原码）。
+--   ⚠️ 不要把它接回 CSF_ReserveCityStates（保留函数本体只是为了历史可追溯）。
 local function CSF_ForceReserve()
-    return CSF_ReserveCityStates();
+    print("[CSF] ⛔ ForceReserve 已停用（开局预留实验不可再被触发）");
+    return false, "startup_experiment_disabled";
 end
 
 -- ---------------------------------------------------------------------------
@@ -1436,6 +1588,28 @@ end
 -- ---------------------------------------------------------------------------
 
 -- 返回【全部可建立城邦】列表（XP2 为 48 条），每条附带"本局是否已有休眠玩家"
+-- Empty closed slots are distinct from preassigned dormant city-states.
+-- Never touch a slot with an identity, a game-side Player or an isolation mark.
+local function CSF_FindClosedCityStateSlot()
+    if C6FW == nil or C6FW.PrepareClosedCityState == nil or
+       C6FW.GetNativeSlotStatus == nil or C6FW.HasGamePlayer == nil or
+       CSF_Safe(function() return GameConfiguration.GetValue("RULESET") end) ~= "RULESET_EXPANSION_2" then
+        return nil;
+    end
+    for i = 0, 61 do
+        local cfg = PlayerConfigurations[i];
+        if cfg ~= nil and CSF_IsolatedReason(i) == nil then
+            local civ = CSF_Safe(function() return cfg:GetCivilizationTypeName() end);
+            local leader = CSF_Safe(function() return cfg:GetLeaderTypeName() end);
+            local level = CSF_Safe(function() return cfg:GetCivilizationLevelTypeName() end);
+            if civ == nil and leader == nil and level == nil and
+               CSF_Safe(function() return C6FW.GetNativeSlotStatus(i) end) == 2 and
+               CSF_Safe(function() return C6FW.HasGamePlayer(i) end) ~= 1 then return i; end
+        end
+    end
+    return nil;
+end
+
 local function CSF_GetFoundableCityStates()
     local sRuleset = CSF_Safe(function() return GameConfiguration.GetValue("RULESET") end);
     local sDomain = "Expansion2CityStates";
@@ -1485,7 +1659,7 @@ local function CSF_GetFoundableCityStates()
                     local sCiv = CSF_Safe(function()
                         return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
                     end);
-                    if sCiv ~= nil and tDormant[sCiv] == nil then
+                    if sCiv ~= nil and tDormant[sCiv] == nil and CSF_IsolatedReason(iPlayer) == nil then
                         tDormant[sCiv] = iPlayer;
                     end
                 end
@@ -1498,6 +1672,30 @@ local function CSF_GetFoundableCityStates()
     local iDormantCount = 0;
     for _ in pairs(tDormant) do iDormantCount = iDormantCount + 1 end
 
+    -- 副本路径的候选槽：只允许真正的预注册城邦休眠槽，不能拿已经初始化
+    -- 或已隔离的玩家改身份。这个扫描只读，不改变开局数量和玩家状态。
+    local function CSF_FindCopySlot()
+        if not CSF_ENABLE_COPY or C6FW == nil or C6FW.GetNativeSlotStatus == nil
+           or C6FW.HasGamePlayer == nil then return nil end
+        for j = 0, 61 do
+            local sIso = CSF_IsolatedReason(j);
+            local sLevel = CSF_Safe(function()
+                return PlayerConfigurations[j]:GetCivilizationLevelTypeName();
+            end);
+            local bAlive = CSF_Safe(function()
+                return Players[j] ~= nil and Players[j]:IsAlive() == true;
+            end);
+            local nStatus = CSF_Safe(function() return C6FW.GetNativeSlotStatus(j) end);
+            local bHasPlayer = CSF_Safe(function() return C6FW.HasGamePlayer(j) end);
+            if sIso == nil and sLevel == "CIVILIZATION_LEVEL_CITY_STATE"
+               and bAlive ~= true and nStatus == 5 and bHasPlayer ~= 1 then
+                return j;
+            end
+        end
+        return nil;
+    end
+
+    local iClosed = CSF_FindClosedCityStateSlot();
     local tOut = {};
     for _, row in ipairs(tRows) do
         local iDormant = tDormant[row.CivilizationType];
@@ -1519,13 +1717,42 @@ local function CSF_GetFoundableCityStates()
                     local sThisCiv = CSF_Safe(function() return pCfg:GetCivilizationTypeName() end);
                     if sThisCiv == row.CivilizationType then
                         local bAlive = CSF_Safe(function() return Players[j]:IsAlive() end);
-                        if bAlive ~= true then iFree = j; break end;
+                        local nStatus = CSF_Safe(function()
+                            return C6FW ~= nil and C6FW.GetNativeSlotStatus ~= nil
+                                   and C6FW.GetNativeSlotStatus(j) or nil;
+                        end);
+                        local bHasPlayer = CSF_Safe(function()
+                            return C6FW ~= nil and C6FW.HasGamePlayer ~= nil
+                                   and C6FW.HasGamePlayer(j) or nil;
+                        end);
+                        if bAlive ~= true and nStatus == 5 and bHasPlayer ~= 1
+                           and CSF_IsolatedReason(j) == nil then
+                            iFree = j; break
+                        end
                     end
                 end
             end
             if iFree ~= nil then
                 sMode = "slot";
                 iDormant = iFree;        -- 面板/建立函数都用 ReusePlayerID 这个字段
+            elseif iClosed ~= nil then
+                local hasIdentity = false;
+                for j = 0, 63 do
+                    if CSF_Safe(function() return PlayerConfigurations[j]:GetCivilizationTypeName() end) == row.CivilizationType then
+                        hasIdentity = true; break;
+                    end
+                end
+                if not hasIdentity then sMode = "register"; iDormant = iClosed;
+                elseif CSF_ENABLE_COPY then sMode = "copy"; iDormant = iClosed;
+                else sMode = "unavailable"; end
+            elseif CSF_ENABLE_COPY then
+                local iCopyFree = CSF_FindCopySlot();
+                if iCopyFree ~= nil then
+                    sMode = "copy";
+                    iDormant = iCopyFree;
+                else
+                    sMode = "unavailable";
+                end
             else
                 sMode = "unavailable";
             end
@@ -1535,6 +1762,17 @@ local function CSF_GetFoundableCityStates()
             sMode = "dynamic";           -- ⭐ 实测正确（T-111）
         else
             sMode = "unavailable";
+        end
+        local unavailableReason = nil;
+        if sMode == "unavailable" and C6FW ~= nil and C6FW.GetNativeSlotStatus ~= nil and
+           C6FW.HasGamePlayer ~= nil and CSF_ENABLE_SLOT_ACTIVATION and CSF_ENABLE_COPY and
+           iClosed == nil and CSF_FindCopySlot() == nil then
+            unavailableReason = "no_free_slot";
+        end
+        if C6FW == nil or C6FW.SetCityStateIdentityText == nil or C6FW.PublishCityStateReady == nil or
+           C6FW.InitializeCityStateTurnTasks == nil or C6FW.GetPlayerSnapshot == nil then
+            sMode = "unavailable";
+            unavailableReason = "native_unavailable";
         end
         tOut[#tOut + 1] = {
             Civ              = row.CivilizationType,
@@ -1546,8 +1784,11 @@ local function CSF_GetFoundableCityStates()
             BonusXP2         = row.Bonus_XP2,
             ReusePlayerID    = iDormant,
             Mode             = sMode,
-            -- reuse / slot / dynamic 都机制完整；retarget 是半成品，**不谎报为"完整"**。
-            CanReceiveInfluence = (sMode == "reuse" or sMode == "slot" or sMode == "dynamic"),
+            UnavailableReason = unavailableReason,
+            -- Availability only; actual identity/abilities/contact are verified
+            -- after the native operation. This flag is not business acceptance.
+            CanReceiveInfluence = (sMode == "reuse" or sMode == "slot" or sMode == "register" or
+                                   sMode == "copy" or sMode == "dynamic"),
         };
     end
 
@@ -1701,9 +1942,12 @@ local function CSF_NextCopySuffix(iSlot)
     -- 数一下这个文明已经建了几个副本 → " II" / " III" / …
     local iN = 0;
     CSF_Safe(function()
+        local sourceCiv = CSF_Safe(function()
+            return PlayerConfigurations[iSlot]:GetCivilizationTypeName();
+        end);
         for i = 0, 63 do
             local sCopyMark = Game:GetProperty("CSF_CopyOf_" .. tostring(i));
-            if sCopyMark ~= nil then iN = iN + 1 end
+            if sCopyMark ~= nil and (sourceCiv == nil or sCopyMark == sourceCiv) then iN = iN + 1 end
         end
     end);
     local tRoman = { "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X" };
@@ -1711,10 +1955,29 @@ local function CSF_NextCopySuffix(iSlot)
     return " " .. sSuffixNew;
 end
 
+-- CityNames are globally consumed. An exhausted city-state pool otherwise
+-- gives copies unrelated major-civ names (observed Washington/Philadelphia).
+-- Keep a localization template in the real city name, not a localized literal.
+local function CSF_CopyCityNameKey(sCiv)
+    if GameInfo == nil or GameInfo.CityNames == nil then return nil; end
+    local ok, key = pcall(function()
+        for row in GameInfo.CityNames() do
+            if row.CivilizationType == sCiv and type(row.CityName) == "string" and
+               string.match(row.CityName, "^LOC_[A-Z0-9_]+$") then return row.CityName; end
+        end
+    end);
+    if ok then return key; end
+    return nil;
+end
+
 local function CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID)
     -- 目标文明本局已被占用 → 找一个新的槽，设成【同一个文明】，再建一个
-    local pm = WorldBuilder and WorldBuilder.PlayerManager and WorldBuilder.PlayerManager() or nil;
-    if pm == nil then return false, "no_worldbuilder" end;
+    if C6FW == nil or C6FW.PreparePlayerIdentity == nil or
+       C6FW.ActivatePlayer == nil or C6FW.GetNativeSlotStatus == nil or
+       C6FW.HasGamePlayer == nil then
+        print("[CSF] copy: 原生身份/激活桥不可用，拒绝副本");
+        return false, "no_identity_bridge";
+    end
 
     local sLeader = CSF_GetLeaderForCiv(sCiv);
     if sLeader == nil then
@@ -1729,123 +1992,118 @@ local function CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID)
         return false, sPre;
     end
 
-    -- ② 找一个【同类别】的休眠槽并释放它
-    --    同类别才能拿到正确的 front 颜色（6 个类别对应 6 个 front 值，实测）
-    local sTargetCat = nil;
-    CSF_Safe(function()
-        local tRows = DB.ConfigurationQuery(
-            "SELECT CivilizationType, CityStateCategory FROM CityStates");
-        if type(tRows) == "table" then
-            for _, r in ipairs(tRows) do
-                if r.CivilizationType == sCiv then sTargetCat = r.CityStateCategory end
+    local sCopyCityNameKey = CSF_CopyCityNameKey(sCiv);
+    if sCopyCityNameKey == nil then return false, "copy_city_name_unavailable"; end
+
+    -- ② 只挑真正的原生休眠槽：状态 5、没有游戏侧 Player、配置等级为城邦。
+    --    不再 UninitializePlayer/AddPlayer；那条路会破坏引擎为预注册槽准备的
+    --    颜色、外交和 AI 容器。身份改写必须发生在 RegisterPlayer 之前。
+    local iVictim = CSF_FindClosedCityStateSlot();
+    local bClosed = iVictim ~= nil;
+    for i = 0, 61 do
+        if iVictim == nil then
+            local sLevel = CSF_Safe(function()
+                return PlayerConfigurations[i]:GetCivilizationLevelTypeName();
+            end);
+            local bAlive = CSF_Safe(function()
+                return Players[i] ~= nil and Players[i]:IsAlive() == true;
+            end);
+            local nStatus = CSF_Safe(function() return C6FW.GetNativeSlotStatus(i) end);
+            local bHasPlayer = CSF_Safe(function() return C6FW.HasGamePlayer(i) end);
+            if CSF_IsolatedReason(i) == nil and sLevel == "CIVILIZATION_LEVEL_CITY_STATE" and bAlive ~= true and
+               nStatus == 5 and bHasPlayer ~= 1 then
+                iVictim = i;
             end
         end
-    end);
-
-    local tDormant = {};
-    local tIDs = CSF_Safe(function() return PlayerManager.GetAliveMinorIDs() end) or {};
-    for _, iPlayer in ipairs(tIDs) do
-        local pPlayer = Players[iPlayer];
-        if pPlayer ~= nil then
-            local iCities = CSF_Safe(function() return pPlayer:GetCities():GetCount() end) or 0;
-            if iCities == 0 then
-                local bOnMap = false;
-                CSF_Safe(function()
-                    for _, pUnit in pPlayer:GetUnits():Members() do
-                        local x, y = pUnit:GetX(), pUnit:GetY();
-                        if x ~= nil and y ~= nil and x >= 0 and y >= 0 then bOnMap = true break end
-                    end
-                end);
-                if not bOnMap then
-                    local sThis = CSF_Safe(function()
-                        return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
-                    end);
-                    local sCat = nil;
-                    CSF_Safe(function()
-                        local tRows = DB.ConfigurationQuery(
-                            "SELECT CityStateCategory FROM CityStates WHERE CivilizationType='" ..
-                            tostring(sThis) .. "'");
-                        if type(tRows) == "table" and tRows[1] ~= nil then
-                            sCat = tRows[1].CityStateCategory;
-                        end
-                    end);
-                    tDormant[#tDormant + 1] = { ID = iPlayer, Civ = sThis, Cat = sCat };
-                end
-            end
-        end
-    end
-
-    local iVictim = nil;
-    for _, k in ipairs(tDormant) do
-        if iVictim == nil and sTargetCat ~= nil and k.Cat == sTargetCat then iVictim = k.ID end
-    end
-    if iVictim == nil then
-        for _, k in ipairs(tDormant) do if iVictim == nil then iVictim = k.ID end end
     end
     if iVictim == nil then
         print("[CSF] copy: 没有可复用的休眠槽（池子已用尽）");
         return false, "no_free_slot";
     end
-    print("[CSF] copy: 复用休眠槽 " .. tostring(iVictim) .. " 作副本，目标类别=" ..
-          tostring(sTargetCat));
+    print("[CSF] copy: 使用原生休眠槽 " .. tostring(iVictim) .. " 准备同文明副本");
 
-    -- ③ ★★ 核心：释放休眠槽 → AddPlayer 拿回它 → 改文明（顺序不可换）
-    --
-    --   ⚠️⚠️⚠️ 2026-10-04 修正：**绝对不要用 SetPlayerSlotStatus + InitializePlayer！**
-    --      那条路实测会让游戏在【点下一回合】时原生崩溃（无 Lua 报错、无转储）。
-    --      原因：InitializePlayer 是"手工初始化一个已存在的槽"，玩家处于
-    --      "引擎认为已存在、但 AI 数据不全"的状态，AI 回合处理时踩空。
-    --
-    --      正确做法（本文件 1519-1596 行早已验证过的流程）：
-    --        UninitializePlayer(休眠槽)  →  AddPlayer(true)  →  SetPlayerLeader
-    --        →  SetRandomMinorStartingPosition  →  放 UNIT_SETTLER
-    --      这样玩家是引擎【新建】的，初始化完整；而且拿回的是"开局就存在"的槽，
-    --      UI 的颜色表认识它（否则旗标取不到颜色）。
-    pcall(function() pm:UninitializePlayer(iVictim) end);
-
-    -- ⭐ 用 AddPlayer 把那个槽【重新拿回来】（这一步不能省！）
-    local iNew = nil;
-    pcall(function() iNew = pm:AddPlayer(true) end);
-    if iNew == nil or iNew == -1 then
-        print("[CSF] copy: AddPlayer 失败（空槽可能已用尽）");
-        return false, "no_free_slot";
+    local function failCopy(reason)
+        CSF_MarkIsolated(iVictim, reason);
+        return false, reason, iVictim, true;
     end
-    if iNew ~= iVictim then
-        print("[CSF] copy: NOTE 拿到的槽 " .. tostring(iNew) ..
-              " 不同于释放的槽 " .. tostring(iVictim) .. "（颜色可能仍缺失）");
-    end
-    iVictim = iNew;
 
-    local bSet = pcall(function()
-        pm:SetPlayerLeader(iVictim, sLeader, sCiv, "CIVILIZATION_LEVEL_CITY_STATE");
+    -- ③ 官方身份选择器顺序：领袖 -> 文明 -> 配置刷新。
+    local okIdentity, rIdentity = pcall(
+        bClosed and C6FW.PrepareClosedCityState or C6FW.PreparePlayerIdentity,
+        iVictim, sCiv, sLeader);
+    print("[CSF] copy: PreparePlayerIdentity ok=" .. tostring(okIdentity) ..
+          " 返回=" .. tostring(rIdentity));
+    if (not okIdentity) or rIdentity ~= 1 then
+        return failCopy("prepare_identity_failed");
+    end
+    local preparedCiv = CSF_Safe(function()
+        return PlayerConfigurations[iVictim]:GetCivilizationTypeName();
     end);
-    if not bSet then
-        print("[CSF] copy: SetPlayerLeader 失败");
-        return false, "set_leader_failed";
+    local preparedLeader = CSF_Safe(function()
+        return PlayerConfigurations[iVictim]:GetLeaderTypeName();
+    end);
+    if preparedCiv ~= sCiv or preparedLeader ~= sLeader then
+        print("[CSF] copy: 身份预配置读回不一致 civ=" .. tostring(preparedCiv) ..
+              " leader=" .. tostring(preparedLeader));
+        return failCopy("prepare_identity_mismatch");
     end
 
-    -- ④ 补起始位置（DLL 提示："Players without start positions will be removed."）
-    pcall(function() pm:SetRandomMinorStartingPosition(iVictim) end);
-
-    -- ④b ★★★ 2026-10-04：**用 DLL 完整激活**（这一步以前完全没有！）
-    --
-    --   为什么必需：`SetPlayerLeader` 只是把文明/领袖**写在配置上**，
-    --   游戏侧玩家对象并没有被创建和初始化。引擎开局的激活链
-    --   （FUN_180228580 → FUN_1802f9350，16 个子系统）从不经过 Lua。
-    --   实测：不做这一步时，造出的副本玩家 IsAlive=false、Diplomacy=nil，
-    --   点下一回合 AI 处理时**原生崩溃**。
+    -- ④ 只把最终坐标交给原生氏族激活链；它负责注册、alive 和 23 张列表。
     if C6FW ~= nil and C6FW.ActivatePlayer ~= nil then
-        local okA, rA = pcall(C6FW.ActivatePlayer, iVictim);
+        local okA, rA = pcall(C6FW.ActivatePlayer, iVictim, iX, iY);
         print("[CSF] copy: DLL 激活 ok=" .. tostring(okA) .. " 返回=" .. tostring(rA));
-        pcall(function() pm:SetPlayerSlotStatus(iVictim, CSF_SLOT_AI) end);
-        if C6FW.SetAlive ~= nil then
-            local okS, rS = pcall(C6FW.SetAlive, iVictim, 1);
-            print("[CSF] copy: SetAlive ok=" .. tostring(okS) .. " 返回=" .. tostring(rS));
+        if (not okA) or rA ~= 1 then
+            return failCopy("activate_player_failed");
+        end
+        local alivePublished = false;
+        if C6FW.GetAlive ~= nil then
+            local okG, rG = pcall(C6FW.GetAlive, iVictim);
+            alivePublished = okG and rG == 1;
+            print("[CSF] copy: GetAlive 只读确认 ok=" .. tostring(okG) ..
+                  " 返回=" .. tostring(rG));
+        end
+        if not alivePublished then
+            return failCopy("set_alive_failed");
+        end
+        -- 副本实验不接受旧桥的弱证据：当前原生桥必须把目标对象发布到
+        -- 全局/城邦三元组列表，且目标槽、alive、初始化字段都读回一致。
+        if C6FW.GetPlayerSnapshot == nil then
+            return failCopy("snapshot_unavailable");
+        end
+        local okSnap, snap = pcall(C6FW.GetPlayerSnapshot, iVictim);
+        if (not okSnap) or type(snap) ~= "table" or snap.target_slot == nil then
+            return failCopy("snapshot_failed");
+        end
+        local snapshotChecks = {
+            snap.read_status == 0,
+            snap.global_read_status == 0,
+            snap.city_state_read_status == 0,
+            snap.global_list_state == 5,
+            snap.city_state_list_state == 5,
+            snap.global_bad_member_pointer_count == 0,
+            snap.global_bad_member_id_count == 0,
+            snap.city_state_bad_member_pointer_count == 0,
+            snap.city_state_bad_member_id_count == 0,
+            snap.target_slot_valid == 1 and snap.target_slot == iVictim,
+            snap.target_pointer_found == 1,
+            snap.global_target_pointer_hits == 2,
+            snap.global_target_slot_hits == 3,
+            snap.city_state_target_pointer_hits == 2,
+            snap.city_state_target_slot_hits == 3,
+            snap.target_slot_id_read == 1 and snap.target_slot_id == iVictim,
+            snap.target_alive_read == 1 and snap.target_alive ~= 0,
+            snap.target_initialized_read == 1 and snap.target_initialized ~= 0,
+        };
+        for _, passed in ipairs(snapshotChecks) do
+            if not passed then
+                print("[CSF] copy: 原生快照门禁失败，隔离副本槽 " .. tostring(iVictim));
+                return failCopy("snapshot_inconsistent");
+            end
         end
     else
         print("[CSF] ⛔ copy: C6FW.ActivatePlayer 不可用 —— 拒绝造副本。");
         print("[CSF]    原因：只设文明/领袖而不做完整激活，点下一回合会崩游戏。");
-        return false, "no_dll";
+        return failCopy("no_dll");
     end
 
     -- ⑤ 复查：文明 / 领袖 / 等级 三项都要对
@@ -1859,33 +2117,111 @@ local function CSF_FoundCityStateCopy(sCiv, iX, iY, iUnitID, iOwnerID)
           " level=" .. tostring(sGotLvl));
     if sGotCiv ~= sCiv then
         print("[CSF] copy: 文明没设上（得到 " .. tostring(sGotCiv) .. "）→ 放弃");
-        return false, "civ_mismatch";
+        return failCopy("civ_mismatch");
+    end
+    if sGotLdr ~= sLeader or sGotLvl ~= "CIVILIZATION_LEVEL_CITY_STATE" then
+        print("[CSF] copy: 领袖/等级没设上 → 放弃");
+        return failCopy("identity_mismatch");
     end
 
-    -- ⑥ 存副本标记（UI 层据此拼名字后缀）
+    -- ⑥ 颜色必须来自同文明的已存活源城邦；不能接受默认色或 nil。
+    local iSource = nil;
+    for i = 0, 63 do
+        if i ~= iVictim and iSource == nil then
+            local bAlive = CSF_Safe(function()
+                return Players[i] ~= nil and Players[i]:IsAlive() == true;
+            end);
+            local sThis = CSF_Safe(function()
+                return PlayerConfigurations[i]:GetCivilizationTypeName();
+            end);
+            if bAlive == true and sThis == sCiv then iSource = i end
+        end
+    end
+    if iSource == nil or C6FW.CopyPlayerColor == nil or
+       C6FW.GetPlayerColorBySlot == nil then
+        return failCopy("source_color_unavailable");
+    end
+    local okSourceColor, sourceColor = pcall(C6FW.GetPlayerColorBySlot, iSource);
+    if (not okSourceColor) or sourceColor == nil or sourceColor == 0 or
+       sourceColor == 0xffffffff then
+        return failCopy("source_color_invalid");
+    end
+    local okColor, colorAfter = pcall(C6FW.CopyPlayerColor, iSource, iVictim);
+    local okRead, colorRead = pcall(C6FW.GetPlayerColorBySlot, iVictim);
+    if (not okColor) or colorAfter == nil or (not okRead) or colorRead == nil or
+       colorAfter ~= colorRead or colorRead ~= sourceColor then
+        print("[CSF] copy: 颜色复制/读回失败 source=" .. tostring(iSource) ..
+              " target=" .. tostring(iVictim));
+        return failCopy("color_copy_failed");
+    end
+    -- ⑦ 存副本标记（UI 层据此拼名字后缀）
     local sSuffix = CSF_NextCopySuffix(iVictim);
     pcall(function() Game:SetProperty("CSF_CopyOf_" .. tostring(iVictim), sCiv) end);
     pcall(function() Game:SetProperty("CSF_CopySuffix_" .. tostring(iVictim), sSuffix) end);
     print("[CSF] copy: 标记 " .. tostring(iVictim) .. " 为 " .. tostring(sCiv) ..
           " 的副本，后缀=" .. tostring(sSuffix));
 
-    -- ⑦ 建城（T-123：放移民让引擎自建，不用 Cities:Create）
+    -- ⑧ 建城：副本也必须拥有真实城市，不能只放一个移民后就回报成功。
+    --    旧实现把 UNIT_SETTLER 放到地图上，但城邦 AI 不会可靠地自行建城；
+    --    更严重的是，它在单位成功生成后立即返回 ok，造成“面板成功、地图无城”的假成功。
+    --    这里使用官方氏族转换尾段的 native CreateCity 原语；它与 Lua
+    --    Cities:Create 不是同一条链，正是同文明副本此前静默 0 城的阻塞点。
+    --    最后按目标格归属复查；任何异常/静默失败都只隔离，不回滚半初始化槽。
     if m_tReserved[iVictim] then
         m_tReserved[iVictim] = nil;
         print("[CSF] copy: 解除 " .. tostring(iVictim) .. " 的预留标记");
     end
-    local bUnit = pcall(function()
-        UnitManager.InitUnit(iVictim, "UNIT_SETTLER", iX, iY);
-    end);
-    print("[CSF] copy: 放移民到 (" .. tostring(iX) .. "," .. tostring(iY) ..
-          ") ok=" .. tostring(bUnit));
-    if not bUnit then
-        m_tReserved[iVictim] = true;
-        return false, "settler_failed", iVictim, true;
-    end
     CSF_ConsumeEnvoy(iX, iY, iUnitID, iOwnerID);
+    if C6FW == nil or C6FW.CreateCityNative == nil then
+        CSF_MarkIsolated(iVictim, "no_native_city_create");
+        return false, "no_native_city_create", iVictim, true;
+    end
+    -- Native CreateCity reads an engine resident/count-prefixed string at
+    -- args+0x10; never pass a Lua string pointer.  Empty means the engine
+    -- selects an initial name. The fresh copy is renamed through the ordinary
+    -- city API after ownership readback; never pass Lua memory to the worker.
+    local okNative, nativeResult = pcall(
+        C6FW.CreateCityNative, iVictim, iX, iY, "");
+    local bCreate = okNative and nativeResult == 1;
+    local sCreateErr = okNative and (bCreate and "ok" or "native_return_nil") or nativeResult;
+    local iAfter = 0;
+    pcall(function() iAfter = Players[iVictim]:GetCities():GetCount() end);
+    print("[CSF] copy: NativeCityCreate(" .. tostring(iX) .. "," .. tostring(iY) ..
+          ") player=" .. tostring(iVictim) .. " call=" .. tostring(okNative) ..
+          " ok=" .. tostring(bCreate) ..
+          " cities=" .. tostring(iAfter) ..
+          (bCreate and "" or (" err=" .. tostring(sCreateErr):sub(1, 80))));
+    if not bCreate then
+        local sFailure = (not okNative) and "copy_create_threw" or "copy_create_silent_fail";
+        CSF_MarkIsolated(iVictim, sFailure);
+        return false, sFailure, iVictim, true;
+    end
+    local bCityAtTarget = CSF_TargetPlotHasOwnCity(iX, iY, iVictim, iAfter);
+    print("[CSF] copy: 目标格 (" .. tostring(iX) .. "," .. tostring(iY) ..
+          ") 有副本城市 = " .. tostring(bCityAtTarget));
+    if iAfter < 1 or not bCityAtTarget then
+        CSF_MarkIsolated(iVictim, "copy_create_silent_fail");
+        return false, "copy_create_silent_fail", iVictim, true;
+    end
+    -- Only this newly created city is eligible. Do not repeat on load or
+    -- CompleteFounding: subsequent player renames must remain untouched.
+    local pCopyCity = CSF_Safe(function() return Cities.GetCityInPlot(iX, iY); end);
+    local sCopyRawName = "{" .. sCopyCityNameKey .. "}" .. sSuffix;
+    if pCopyCity == nil or CSF_Safe(function() return pCopyCity:GetOwner(); end) ~= iVictim then
+        return failCopy("copy_city_name_unconfirmed");
+    end
+    pcall(function() pCopyCity:SetName(sCopyRawName); end);
+    if CSF_Safe(function() return pCopyCity:GetName(); end) ~= sCopyRawName then
+        return failCopy("copy_city_name_unconfirmed");
+    end
+    Game:SetProperty("CSF_CopyCityName_" .. tostring(iVictim), {
+        CityID = pCopyCity:GetID(), Raw = sCopyRawName, BaseKey = sCopyCityNameKey,
+        Civ = sCiv, Suffix = sSuffix, X = iX, Y = iY,
+    });
+    local iTurnNow = CSF_Safe(function() return Game.GetCurrentGameTurn() end);
+    CSF_MarkFoundSuccess(iTurnNow);
     print("[CSF] copy: 副本 " .. tostring(iVictim) .. "（" .. tostring(sCiv) ..
-          tostring(sSuffix) .. "）的移民已就位，将在它的回合自行建城");
+          tostring(sSuffix) .. "）建城完成");
     return true, "ok", iVictim, true;
 end
 
@@ -1907,13 +2243,67 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
     --   用户那次崩溃正是连续建第 3 个时发生的。
     --
     --   ⇒ 每回合只允许建 1 个；同回合再点则明确告知"请下一回合再建"。
+    --
+    -- ★★★★★ 2026-10-15【修正：只有成功才记账】
+    --   原实现在函数一进来就写 `m_iLastFoundTurn = iTurnNow` —— 于是【任何一次失败】
+    --   （地块不合法、原生激活失败、Create 抛错、静默 0 城…）都会把这一回合的额度
+    --   用掉：玩家重试第二次直接拿到 "one_per_turn"，看起来像"mod 坏了"，
+    --   其实是限流器在失败上也记账。⇒ 现在只在【真正建出城】的成功返回点
+    --   调 CSF_MarkFoundSuccess()；本函数开头的只是【只读检查】。
+    --
+    --   读档语义：额度记在【存档属性】Game:SetProperty("CSF_LastFoundTurn") 上
+    --   （见 CSF_GetLastFoundTurn / CSF_MarkFoundSuccess），不是 local ——
+    --   local 会被读档重置，"读档后同回合再建一个"就漏过去了。
     local iTurnNow = CSF_Safe(function() return Game.GetCurrentGameTurn() end);
-    if m_iLastFoundTurn ~= nil and iTurnNow ~= nil and m_iLastFoundTurn == iTurnNow then
+    local iLastTurn = CSF_GetLastFoundTurn();
+    if iTurnNow ~= nil and iLastTurn ~= nil and iLastTurn == iTurnNow then
         print("[CSF] ⛔ 本回合已经建过一个城邦（回合 " .. tostring(iTurnNow) ..
               "）—— 引擎一回合只允许建一个，请下一回合再建");
         return false, "one_per_turn";
     end
-    m_iLastFoundTurn = iTurnNow;
+
+    -- Every route must reject illegal locations before preparing/registering
+    -- any player; dormant-slot activation must obey the same precondition.
+    local locationOk,locationReason=CSF_IsValidFoundLocation(iX,iY,iOwnerID);
+    if not locationOk then return false,locationReason; end
+    if C6FW == nil or C6FW.SetCityStateIdentityText == nil or C6FW.PublishCityStateReady == nil or
+       C6FW.InitializeCityStateTurnTasks == nil or C6FW.GetPlayerSnapshot == nil then
+        return false,"no_c6fw";
+    end
+
+    -- Zero-opening games have no preassigned identities. Configure exactly
+    -- one empty slot on this explicit request, leaving CITY_STATE_COUNT alone.
+    local hasIdentity = false;
+    for i = 0, 63 do
+        if CSF_Safe(function() return PlayerConfigurations[i]:GetCivilizationTypeName() end) == sCiv then
+            hasIdentity = true; break;
+        end
+    end
+    if not hasIdentity then
+        local iClosed = CSF_FindClosedCityStateSlot();
+        if iClosed ~= nil then
+            local valid, reason = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+            if not valid then return false, reason; end
+            local row = GameInfo.Civilizations[sCiv];
+            local leader = CSF_GetLeaderForCiv(sCiv);
+            if row == nil or row.StartingCivilizationLevelType ~= "CIVILIZATION_LEVEL_CITY_STATE" or leader == nil then
+                return false, "invalid_city_state_identity";
+            end
+            local ok, result = pcall(C6FW.PrepareClosedCityState, iClosed, sCiv, leader);
+            local cfg = PlayerConfigurations[iClosed];
+            local consistent = ok and result == 1 and
+                CSF_Safe(function() return cfg:GetCivilizationTypeName() end) == sCiv and
+                CSF_Safe(function() return cfg:GetLeaderTypeName() end) == leader and
+                CSF_Safe(function() return cfg:GetCivilizationLevelTypeName() end) == "CIVILIZATION_LEVEL_CITY_STATE" and
+                CSF_Safe(function() return C6FW.GetNativeSlotStatus(iClosed) end) == 5 and
+                CSF_Safe(function() return C6FW.HasGamePlayer(iClosed) end) ~= 1;
+            if not consistent then
+                CSF_MarkIsolated(iClosed, "closed_identity_failed");
+                return false, "closed_identity_failed", iClosed;
+            end
+            print("[CSF] registered closed slot " .. tostring(iClosed) .. " as " .. sCiv .. "; opening count unchanged");
+        end
+    end
 
     -- 先把【本局所有休眠城邦玩家】列出来（0 城 = 还没建城）
     --   ⚠️ 同样要排除【已派出移民、待建城】的（T-124，防重复建邦）
@@ -1936,10 +2326,20 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     end
                 end);
                 if not bOnMap then
-                    local sThis = CSF_Safe(function()
-                        return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
-                    end);
-                    tDormant[#tDormant + 1] = { ID = iPlayer, Civ = sThis };
+                    -- ★ 2026-10-15：被失败隔离过的槽【不能】再当正常 reuse 目标。
+                    --   否则读档 / 下次点同一个城邦时又会把它捡起来再提交一次，
+                    --   而它已经被 Create 静默失败损坏（实测 AliveMinors 掉数、
+                    --   canInf 变 false）—— 那正是"半成品当正常路径继续用"。
+                    local sIso = CSF_IsolatedReason(iPlayer);
+                    if sIso ~= nil then
+                        print("[CSF] 跳过已隔离的槽 " .. tostring(iPlayer) ..
+                              "（" .. tostring(sIso) .. "）");
+                    else
+                        local sThis = CSF_Safe(function()
+                            return PlayerConfigurations[iPlayer]:GetCivilizationTypeName();
+                        end);
+                        tDormant[#tDormant + 1] = { ID = iPlayer, Civ = sThis };
+                    end
                 end
             end
         end
@@ -2018,13 +2418,12 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
     --         每个文明有**自己专属**的槽 → 想建哪个城邦，就激活哪个槽。
     --         这条路**不需要改文明**，所以不会触发"玩家与引擎预注册不一致"的崩溃。
     --
-    --   实测（2026-10-06，DLL 修复后）：
-    --     ① C6FW.ActivatePlayer(slot)         → ok
-    --     ② pm:SetPlayerSlotStatus(slot, 1)   → ok（status 5 → 1）
-    --     ③ C6FW.SetAlive(slot, 1)            → ok
-    --     ④ 放移民                            → ok
-    --     复查：IsAlive=true、GetCivType 正确、GetDiplomacy/GetInfluence 有效
-    --     挂机推进 4 回合【无崩溃】，与引擎自己激活的槽状态完全同态。
+    --   当前静态契约：
+    --     ① C6FW.ActivatePlayer(slot)         → 官方氏族链并发布 alive
+    --     ② pm:SetPlayerSlotStatus(slot, 1)   → 兼容状态同步
+    --     ③ C6FW.GetAlive(slot)               → 只读确认；旧桥才兜底 SetAlive
+    --     ④ 放移民                            → 仅在上述证据通过后继续
+    --     真机过回合、外交、存读档和多人仍须独立验收，不能沿用旧日志宣称通过。
     --
     --   ★ 与 reuse 的区别：reuse 只能用【本局已休眠】的少数几个；
     --     这条路能用**全部 54 个**里的任意一个（只要它的槽还没被激活）。
@@ -2039,13 +2438,63 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 local sThisCiv = CSF_Safe(function() return pCfg:GetCivilizationTypeName() end);
                 if sThisCiv == sCiv then
                     local bAlive = CSF_Safe(function() return Players[j]:IsAlive() end);
-                    if bAlive ~= true then iSlot = j; break end;
+                    -- ★ 2026-10-15：已失败隔离的槽不能再当正常 slot 目标。
+                    --   那种槽通常"已激活但没建出城"（Create 静默失败），
+                    --   再提交一次只会重复同一个失败，并把隔离原因冲掉。
+                    local sIso = CSF_IsolatedReason(j);
+                    local nStatus = CSF_Safe(function()
+                        return C6FW ~= nil and C6FW.GetNativeSlotStatus ~= nil
+                               and C6FW.GetNativeSlotStatus(j) or nil;
+                    end);
+                    local bHasPlayer = CSF_Safe(function()
+                        return C6FW ~= nil and C6FW.HasGamePlayer ~= nil
+                               and C6FW.HasGamePlayer(j) or nil;
+                    end);
+                    local bNativeSlotOk = true;
+                    if C6FW ~= nil and C6FW.GetNativeSlotStatus ~= nil then
+                        bNativeSlotOk = nStatus == 5;
+                    end
+                    if C6FW ~= nil and C6FW.HasGamePlayer ~= nil then
+                        bNativeSlotOk = bNativeSlotOk and bHasPlayer ~= 1;
+                    end
+                    if bAlive ~= true and sIso == nil and bNativeSlotOk then
+                        iSlot = j; break
+                    elseif bAlive ~= true and sIso ~= nil then
+                        print("[CSF] slot-activate: 跳过已隔离的槽 " .. tostring(j) ..
+                              "（" .. tostring(sIso) .. "）");
+                    end
                 end
             end
         end
         if iSlot ~= nil then
             print("[CSF] slot-activate: " .. tostring(sCiv) ..
                   " 有未激活的预注册槽 " .. tostring(iSlot) .. " → 激活它");
+
+            -- ★★★★★ 2026-10-15【校验/定位提前到"激活与消耗单位之前"】
+            --
+            --   激活是【不可回滚】的（禁 SetAlive(0) / UninitializePlayer —— 半成品
+            --   回滚是历史崩溃源）。所以必须【先】确认确实有一个可建邦的格：
+            --   否则会白激活一个槽 —— 它没有城、又不能当正常 slot 再提交（只能隔离），
+            --   等于永久废掉池子里的一个城邦。
+            --   定位本身是只读的（CSF_FindFoundLocation 不写任何状态），提前做没有副作用。
+            do
+                local bOkPre, sWhyPre = CSF_IsValidFoundLocation(iX, iY, iOwnerID);
+                if bOkPre ~= true then
+                    print("[CSF] slot-activate: 目标格不合格（" .. tostring(sWhyPre) ..
+                          "）→ 先找合格格，再决定要不要激活");
+                    local okPre, px, py = pcall(CSF_FindFoundLocation, iOwnerID);
+                    if okPre and px ~= nil and px > 0 then
+                        print("[CSF] slot-activate: 改用合格格 (" .. tostring(px) ..
+                              "," .. tostring(py) .. ")");
+                        iX, iY = px, py;
+                    else
+                        print("[CSF] slot-activate: ❌ 全地图找不到可建邦的格（" ..
+                              tostring(sWhyPre) .. "）→ 不激活、不消耗使节");
+                        return false, tostring(sWhyPre);
+                    end
+                end
+            end
+
             -- ⚠️ 必须走 ExposedMembers 跨文件调用！
             --    `CSF_ActivateCityStateSlot` 是 CSF_CreateCityState.lua 里的**局部函数**，
             --    在本文件里是 nil —— 直接调会抛异常（实测：reason=threw）。
@@ -2056,7 +2505,15 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 print("[CSF] slot-activate: ❌ ExposedMembers.CSF.ActivateCityState 不可用");
                 return false, "no_activate_fn";
             end
-            local bAct = fAct(iSlot);
+            -- ★ 2026-10-15：用 pcall 包住激活调用 —— 抛异常【不等于】"什么都没发生"：
+            --   原生 ActivatePlayer 可能已经跑了一部分（注册/初始化到中途才出错），
+            --   所以抛错也按"已调用过原生激活但没成功"保守处理（隔离 + 如实失败，不回滚）。
+            local okAct, bAct, sActReason = pcall(fAct, iSlot, iX, iY);
+            if not okAct then
+                print("[CSF] slot-activate: ❌ 激活函数抛异常 = " .. tostring(bAct));
+                CSF_MarkIsolated(iSlot, "activate_threw");
+                return false, "activate_threw", iSlot, true;
+            end
             if bAct == true then
                 print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活成功，放移民");
 
@@ -2078,8 +2535,21 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                         local okC, rC = pcall(fCol, iSlot);
                         print("[CSF] slot-activate: 补色 ok=" .. tostring(okC)
                               .. " 结果=" .. tostring(rC));
+                        -- ★ 2026-10-15【消除假成功】：原来这个返回值【被完全忽略】。
+                        --   无颜色的城邦会让旗标渲染读 NULL+0xc 崩游戏，所以补不上色
+                        --   就必须如实判失败。此时激活已经发生（不可回滚），
+                        --   只写一条可见的隔离属性，后续不再把它当正常目标提交。
+                        if (not okC) or rC ~= true then
+                            print("[CSF] slot-activate: ❌ 补色失败 slot=" .. tostring(iSlot)
+                                  .. " —— 无颜色城邦会让旗标渲染崩游戏，已隔离该槽");
+                            CSF_MarkIsolated(iSlot, "no_color");
+                            return false, "no_color", iSlot, true;
+                        end
                     else
-                        print("[CSF] slot-activate: ⚠️ ApplyCityStateColor 不可用（补色跳过）");
+                        print("[CSF] slot-activate: ❌ ApplyCityStateColor 不可用"
+                              .. " —— 无法保证旗标颜色，拒绝继续建城");
+                        CSF_MarkIsolated(iSlot, "no_color_fn");
+                        return false, "no_color_fn", iSlot, true;
                     end
                 end
 
@@ -2226,7 +2696,10 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     end
                 end
                 if not bSafe then
-                    return false, "unsafe_plot", iSlot;
+                    -- ★ 2026-10-15：走到这里【槽已经激活过了】—— 它现在是"活的、但没建出城"，
+                    --   不能被当正常 slot 再提交（否则重复同一个失败）→ 保守隔离。
+                    CSF_MarkIsolated(iSlot, "unsafe_plot");
+                    return false, "unsafe_plot", iSlot, true;
                 end
 
                 -- ★★★★★ 2026-10-06【崩溃根因修复】Create 之前【必须】过完整校验（含三环距离）
@@ -2281,7 +2754,10 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     end
                 end
                 if not bSafe then
-                    return false, "no_unit_free_plot", iSlot;
+                    -- ★ 2026-10-15：同上 —— 已激活、使节也已消耗，只是没找到空位 →
+                    --   该槽已经是半成品，保守隔离（不回滚、不造第二个孤儿）。
+                    CSF_MarkIsolated(iSlot, "no_unit_free_plot");
+                    return false, "no_unit_free_plot", iSlot, true;
                 end
 
                 -- ★★★★★ 2026-10-06【最终方案】校验通过后，**直接用 Cities:Create 建城**
@@ -2298,18 +2774,44 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                 --     校验已覆盖：无主 + 无城市 + 半径 2 无单位 + 非水非山 + 离边缘 ≥4。
                 --
                 --   ⚠️ 仍然要 pcall 包住：万一 Create 内部静默失败，至少不会把异常抛给上层。
-                local bCreate, sCreateErr = pcall(function()
-                    Players[iSlot]:GetCities():Create(iX, iY);
-                end);
-                print("[CSF] slot-activate: Cities:Create(" .. tostring(iX) .. "," .. tostring(iY) ..
-                      ") player=" .. tostring(iSlot) .. " ok=" .. tostring(bCreate) ..
-                      (bCreate and "" or (" err=" .. tostring(sCreateErr):sub(1,60))));
+                if C6FW == nil or C6FW.CreateCityNative == nil then
+                    print("[CSF] slot-activate: ❌ C6FW.CreateCityNative 不可用");
+                    CSF_MarkIsolated(iSlot, "no_native_create");
+                    return false, "no_native_create", iSlot, true;
+                end
+                local bCreate, iCreateResult = pcall(
+                    C6FW.CreateCityNative, iSlot, iX, iY, "");
+                print("[CSF] slot-activate: C6FW.CreateCityNative(" ..
+                      tostring(iSlot) .. "," .. tostring(iX) .. "," .. tostring(iY) ..
+                      ") pcall=" .. tostring(bCreate) ..
+                      " result=" .. tostring(iCreateResult));
+
+                -- ★★★★★ 2026-10-15【消除假成功 ①】Create 抛异常就是一个明确的失败原因。
+                --   原实现把 pcall 的第二个返回值只拿去 print，然后继续往下判城市数 ——
+                --   异常原因在语义上被丢掉了。这里直接判失败并如实返回。
+                if not bCreate then
+                    print("[CSF] slot-activate: ❌ NativeCreate 抛异常 = " .. tostring(iCreateResult));
+                    CSF_MarkIsolated(iSlot, "create_threw");
+                    return false, "create_threw", iSlot, true;
+                end
 
                 -- 复查：Create 对非法地块会【静默失败】—— 不报错但城市数不变
                 local iAfter = 0;
                 pcall(function() iAfter = Players[iSlot]:GetCities():GetCount() end);
                 print("[CSF] slot-activate: 建城后城市数 = " .. tostring(iAfter));
-                if iAfter < 1 then
+
+                -- ★★★★★ 2026-10-15【消除假成功 ②】判据不是"这个槽总共有几座城"，
+                --   而是"【目标格上】有没有一座【属于这个槽】的城市"。
+                --
+                --   原实现（已修）：`if iAfter < 1 then print(...) end` —— 只打印一行日志，
+                --   然后【无条件】`return true, "ok", iSlot, true`。于是静默失败被当成
+                --   建邦成功报给面板：玩家看到"成功"，地图上却什么都没有。
+                --   更糟的是若该槽在【别处】已经有城，`iAfter` 直接 ≥1，
+                --   连那行日志都不打印，错得更彻底。
+                local bCityAtTarget = CSF_TargetPlotHasOwnCity(iX, iY, iSlot, iAfter);
+                print("[CSF] slot-activate: 目标格 (" .. tostring(iX) .. "," .. tostring(iY) ..
+                      ") 上有该城邦的城市 = " .. tostring(bCityAtTarget));
+                if iCreateResult ~= 1 or iAfter < 1 or not bCityAtTarget then
                     -- ⛔⛔⛔ 2026-10-06【去掉 InitUnit 兜底】—— 它就是崩溃/挂起源！
                     --
                     --   实测（连续建 3 个）：
@@ -2320,17 +2822,42 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
                     --   原因：`Create` 失败说明引擎的城市列表已经不一致，
                     --   此时再 `InitUnit` 往同一地块塞单位 → 状态更乱 → 崩。
                     --   ⇒ 失败就【如实报告】，不再做任何"补救动作"。
+                    --
+                    -- ⛔ 也【不做回滚】：槽已经完整激活、使节已经在 Create 之前消耗掉，
+                    --   此时 SetAlive(0) / UninitializePlayer 只会把半成品状态搞得更乱
+                    --   （历史上正是这么崩的），也绝不再造第二个孤儿。
+                    --   ⇒ 只留一条【可见的】存档隔离记录，后续不再把它当正常目标提交。
                     print("[CSF] slot-activate: ❌ Create 未生效（引擎本回合已建过一个城邦）");
+                    CSF_MarkIsolated(iSlot, "create_silent_fail");
+                    return false, "create_silent_fail", iSlot, true;
                 end
 
                 -- ★ 2026-10-07：使节已在 Create **之前**消耗掉了（必须先腾空格子，
                 --   否则一格两个玩家的对象 → 崩 0xc）。这里不再重复调用。
 
                 print("[CSF] slot-activate: 槽 " .. tostring(iSlot) ..
-                      " 建邦完成（城市数 " .. tostring(iAfter) .. "）");
+                      " 建邦完成（目标格城市数 " .. tostring(iAfter) .. "）");
+                CSF_MarkFoundSuccess(iTurnNow);     -- ★ 只有成功才记"本回合已建过"
                 return true, "ok", iSlot, true;
             end
             print("[CSF] slot-activate: 槽 " .. tostring(iSlot) .. " 激活失败");
+            -- ★ 2026-10-15【错误原因必须可见】把【原生激活的原始失败原因】如实返回。
+            --   原来这里只是 print 一行就继续往下走到副本/动态兜底，
+            --   最终面板只看到 "no_free_slot" —— 真实原因（原生激活失败）被吞掉了。
+            --
+            -- ★ 2026-10-15【第二次修正 —— 原注释的假设是错的】原注释写
+            --   "激活失败时还没消耗使节、也没建城，所以不需要隔离或回滚"，
+            --   那是把"原生返回失败"等同于"状态没变"。原生桥完全可能【先注册/初始化
+            --   一部分、再返回 0/nil/false】。所以：调用过原生激活而没成功的槽，
+            --   一律保守写隔离属性（不回滚 —— 半成品回滚是历史崩溃源），
+            --   后续挑目标时跳过它，不把可能是半成品的槽当干净槽重复提交。
+            -- These failures occur before the helper calls any native writer.
+            -- Missing dependencies must not permanently consume a clean slot.
+            if sActReason ~= "no_c6fw" and sActReason ~= "no_player_manager"
+               and sActReason ~= "bad_slot" then
+                CSF_MarkIsolated(iSlot, tostring(sActReason or "activate_failed"));
+            end
+            return false, tostring(sActReason or "activate_failed"), iSlot, true;
         else
             print("[CSF] slot-activate: " .. tostring(sCiv) .. " 没有可用的未激活槽");
         end
@@ -2425,31 +2952,63 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
             end
         end
 
+        -- ★★★★★ 2026-10-15【消除假成功 ③】守卫/终检/腾格任一步没过 → 根本没尝试 Create。
+        --   原来这种情况会一路落到下面的 `iAfterR < 1`，报出含糊的 "settler_failed"。
+        --   具体卡在哪一步，上面每一步都已经各打印了一行具体原因。
+        if not bSafeR then
+            print("[CSF] settle: ❌ 守卫未通过（地块不安全 / 终检不合格 / 无空位），未尝试 Create");
+            return false, "unsafe_plot", iReuse, true;
+        end
+
+        if C6FW == nil or C6FW.CreateCityNative == nil then
+            print("[CSF] settle: ❌ C6FW.CreateCityNative 不可用");
+            CSF_MarkIsolated(iReuse, "no_native_create");
+            return false, "no_native_create", iReuse, true;
+        end
         local iAfterR = 0;
-        if bSafeR then
-            local bCr = pcall(function() Players[iReuse]:GetCities():Create(iX, iY) end);
-            pcall(function() iAfterR = Players[iReuse]:GetCities():GetCount() end);
-            print("[CSF] settle: Cities:Create(" .. tostring(iX) .. "," .. tostring(iY) ..
-                  ") player=" .. tostring(iReuse) .. " ok=" .. tostring(bCr) ..
-                  " 城市数=" .. tostring(iAfterR));
+        local bCr, iCrResult = pcall(
+            C6FW.CreateCityNative, iReuse, iX, iY, "");
+        pcall(function() iAfterR = Players[iReuse]:GetCities():GetCount() end);
+        print("[CSF] settle: C6FW.CreateCityNative(" .. tostring(iReuse) .. "," ..
+              tostring(iX) .. "," .. tostring(iY) .. ") pcall=" .. tostring(bCr) ..
+              " result=" .. tostring(iCrResult) .. " 城市数=" .. tostring(iAfterR));
+
+        -- ★★★★★ 2026-10-15【消除假成功 ④】Create 抛异常 = 明确失败（不吞异常继续走）。
+        if not bCr then
+            print("[CSF] settle: ❌ NativeCreate 抛异常 = " .. tostring(iCrResult));
+            CSF_MarkIsolated(iReuse, "settle_create_threw");
+            return false, "settle_create_threw", iReuse, true;
         end
 
-        local bUnit = false;
-        if iAfterR < 1 then
-            -- ⛔ 同上：不再退回 InitUnit（它是崩溃/挂起源）
+        -- ★★★★★ 2026-10-15【消除假成功 ⑤】判据不是"这个城邦总共有几座城"，
+        --   而是"【目标格上】有没有一座【属于它】的城市"。
+        --
+        --   原实现（已修）用 `iAfterR < 1`：那个数包含该玩家【别处】的城市。
+        --   若它别处已经有城（开局给过 / 上次操作留下的），`iAfterR` 直接 ≥1，
+        --   于是"目标格根本没建出城"被当成成功 → 面板报成功、地图上什么都没有。
+        local bCityAtTargetR = CSF_TargetPlotHasOwnCity(iX, iY, iReuse, iAfterR);
+        print("[CSF] settle: 目标格 (" .. tostring(iX) .. "," .. tostring(iY) ..
+              ") 上有该城邦的城市 = " .. tostring(bCityAtTargetR));
+        if iCrResult ~= 1 or iAfterR < 1 or not bCityAtTargetR then
+            -- ⛔ 同上：不再退回 InitUnit（它是崩溃/挂起源）。
             print("[CSF] settle: ❌ Create 未生效（引擎本回合已建过一个城邦）");
-        end
-
-        if iAfterR < 1 and not bUnit then
-            -- Create 和放移民都失败 → 恢复预留标记，避免它变成"会乱跑"的城邦
-            m_tReserved[iReuse] = true;
-            return false, "settler_failed", iReuse, true;
+            -- ⛔ 也【不做回滚】：使节在这一步之前就已经消耗掉了，
+            --   而 T-123 实测表明 Create 静默失败会【永久损坏该城邦】
+            --   （AliveMinors 递减、canInf 变 false）。所以这里：
+            --     · 不 SetAlive(0) / 不 UninitializePlayer（半成品回滚是历史崩溃源）
+            --     · 不造第二个孤儿
+            --     · 只写一条【可见的】存档隔离记录 → 后续不再把它当正常 reuse 提交
+            --   （原来这里把 m_tReserved[iReuse] 恢复成 true —— 那是个已经不再被
+            --     任何路径读取的标记，等于用假状态掩盖失败；已换成真正的隔离属性。）
+            CSF_MarkIsolated(iReuse, "settle_silent_fail");
+            return false, "settle_silent_fail", iReuse, true;
         end
 
         -- ★ 2026-10-07：使节已在 Create **之前**消耗掉了（同上，必须先腾空格子）。
 
         print("[CSF] settle: 城邦 " .. tostring(iReuse) ..
-              " 建邦完成（城市数 " .. tostring(iAfterR) .. "）");
+              " 建邦完成（目标格城市数 " .. tostring(iAfterR) .. "）");
+        CSF_MarkFoundSuccess(iTurnNow);         -- ★ 只有成功才记"本回合已建过"
         return true, "ok", iReuse, true;        -- bFullMechanics = true
     end
 
@@ -2463,7 +3022,11 @@ local function CSF_FoundCityStateByCiv(sCiv, iX, iY, iUnitID, iOwnerID)
         if bCopy == true then
             return true, sCopyReason, iCopy, bCopyFull;
         end
-        print("[CSF] 建副本失败（" .. tostring(sCopyReason) .. "），继续走后续兜底");
+        -- A copy attempt may have already activated and isolated a native
+        -- slot.  Do not hide that concrete failure behind the later generic
+        -- no_free_slot fallback, and never continue into another allocator.
+        print("[CSF] 建副本失败（" .. tostring(sCopyReason) .. "），停止后续兜底");
+        return false, tostring(sCopyReason or "copy_failed"), iCopy, bCopyFull == true;
     end
 
     -- ★ 兜底：动态创建（AddPlayer）——默认【关闭】，见上方开关说明
@@ -2643,26 +3206,346 @@ end
 --          GameCore 在 `Events.GameCoreEventPublishComplete` 里取出来执行。
 --          执行结果用 `GameEvents.CSF_FoundResult` 广播回 UI。
 -- ---------------------------------------------------------------------------
+-- 官方场景 AlexanderScenario.lua:13-27 / WarMachineScenario.lua:72-83：
+-- SetHasMet 在 Gameplay 建立接触；建邦奖励用发起者的 GiveFreeTokenToPlayer，
+-- 不能在 UI 花掉现有使者。持久记录同时用于读档与中途失败后的幂等恢复。
+local function CSF_IdentityTexts(iCs)
+    local cfg = PlayerConfigurations[iCs];
+    local row = cfg and GameInfo.Civilizations[cfg:GetCivilizationTypeName()];
+    if row == nil or row.StartingCivilizationLevelType ~= "CIVILIZATION_LEVEL_CITY_STATE" then return nil; end
+    return {ShortName=row.Name, Description=row.Description, Adjective=row.Adjective};
+end
+
+local function CSF_EnsureIdentityText(iCs)
+    local text = CSF_IdentityTexts(iCs);
+    if text == nil or C6FW == nil or C6FW.SetCityStateIdentityText == nil then return false; end
+    local ok, result = pcall(C6FW.SetCityStateIdentityText, iCs, text.ShortName, text.Description, text.Adjective);
+    local cfg = PlayerConfigurations[iCs];
+    return ok and result == 1 and cfg:GetCivilizationShortDescription() == text.ShortName and
+        cfg:GetCivilizationDescription() == text.Description;
+end
+
+local function CSF_EnsureCityStateDefense(iCs, pCity)
+    local p = Players[iCs];
+    local warrior = GameInfo.Units["UNIT_WARRIOR"];
+    local floor = warrior and warrior.Combat;
+    if p == nil or pCity == nil or pCity:GetOwner() ~= iCs or
+       type(floor) ~= "number" or floor <= 0 then return false; end
+    local cfg = PlayerConfigurations[iCs];
+    if cfg == nil or cfg:GetCivilizationLevelTypeName() ~= "CIVILIZATION_LEVEL_CITY_STATE" then return false; end
+    local ok, defense = pcall(function()
+        -- Official BlackDeathScenario.lua:121-126 sets this same minimum
+        -- trained strength for city defenses. The engine keeps the maximum;
+        -- this never lowers advanced players' history or adds a fake unit.
+        p:GetStats():UpdateMaxMeleeStrengthTrained(floor);
+        return pCity:GetDistricts():GetDistrictAtLocation(pCity:GetX(), pCity:GetY()):GetDefenseStrength();
+    end);
+    if not ok or type(defense) ~= "number" or defense < 0 then return false; end
+    Game:SetProperty("CSF_DefenseFloor_" .. tostring(iCs), floor);
+    return true;
+end
+
+local function CSF_ExpectedAbilityRoots(iCs)
+    local cfg = PlayerConfigurations[iCs];
+    if cfg == nil or cfg:GetCivilizationLevelTypeName() ~= "CIVILIZATION_LEVEL_CITY_STATE" or
+       GameInfo.LeaderTraits == nil or GameInfo.CivilizationTraits == nil or
+       GameInfo.TraitModifiers == nil then return nil; end
+    local traits, visited, roots = {}, {}, {};
+    local leader = cfg:GetLeaderTypeName();
+    for depth = 1, 32 do
+        if leader == nil then break; end
+        if visited[leader] then return nil; end
+        visited[leader] = true;
+        local row = GameInfo.Leaders[leader];
+        if row == nil then return nil; end
+        for trait in GameInfo.LeaderTraits() do
+            if trait.LeaderType == leader then traits[trait.TraitType] = true; end
+        end
+        leader = row.InheritFrom;
+    end
+    if leader ~= nil then return nil; end
+    local civ = cfg:GetCivilizationTypeName();
+    for trait in GameInfo.CivilizationTraits() do
+        if trait.CivilizationType == civ then traits[trait.TraitType] = true; end
+    end
+    for modifier in GameInfo.TraitModifiers() do
+        if traits[modifier.TraitType] then roots[modifier.ModifierId] = true; end
+    end
+    if next(roots) == nil then return nil; end
+    return roots;
+end
+
+local function CSF_EnsureCityStateAbilities(iCs)
+    if GameEffects == nil or GameEffects.GetModifiers == nil or C6FW == nil or
+       C6FW.PublishCityStateReady == nil then return false; end
+    local roots = CSF_ExpectedAbilityRoots(iCs);
+    if roots == nil then return false; end
+    local function readRoots()
+        local counts, present, expected = {}, 0, 0;
+        for id in pairs(roots) do expected = expected + 1; counts[id] = 0; end
+        for _, id in pairs(GameEffects.GetModifiers()) do
+            local owner = GameEffects.GetModifierOwner(id);
+            if GameEffects.GetObjectType(owner) == "LOC_MODIFIER_OBJECT_PLAYER" and
+               GameEffects.GetObjectsPlayerId(owner) == iCs then
+                local def = GameEffects.GetModifierDefinition(id);
+                if def and roots[def.Id] then counts[def.Id] = counts[def.Id] + 1; end
+            end
+        end
+        local complete = true;
+        for _, count in pairs(counts) do
+            present = present + count;
+            if count ~= 1 then complete = false; end
+        end
+        return complete, present, expected;
+    end
+    local complete, present = readRoots();
+    if complete then return true; end
+    -- Official notification has several subscribers. Never replay it over a
+    -- partial/duplicated root set, or after an uncertain dispatch: this could
+    -- duplicate unrelated persistent modifiers. A property alone is not proof.
+    local key = "CSF_AbilityReadyAttempted_" .. tostring(iCs);
+    if present ~= 0 or Game:GetProperty(key) then return false; end
+    Game:SetProperty(key, true);
+    pcall(C6FW.PublishCityStateReady, iCs);
+    complete = readRoots();
+    return complete;
+end
+
+-- The official conversion chain assembles transient AI turn tasks after
+-- city creation. Ability notification and HasMet do not build these tasks.
+-- The pinned XP2 worker appends: never replay over a partial/nonempty state,
+-- or after an uncertain attempt. Load already rebuilds a complete task set.
+local function CSF_EnsureCityStateTurnTasks(iCs)
+    if C6FW == nil or C6FW.GetPlayerSnapshot == nil or
+       C6FW.InitializeCityStateTurnTasks == nil then return false; end
+    local function readState()
+        local ok, s = pcall(C6FW.GetPlayerSnapshot, iCs);
+        if not ok or type(s) ~= "table" or s.read_status ~= 0 or
+           s.global_read_status ~= 0 or s.city_state_read_status ~= 0 or
+           s.global_list_state ~= 5 or s.city_state_list_state ~= 5 or
+           s.target_slot ~= iCs or s.target_slot_valid ~= 1 or s.target_pointer_found ~= 1 or
+           s.target_slot_id_read ~= 1 or s.target_slot_id ~= iCs or
+           s.target_initialized_read ~= 1 or s.target_initialized ~= 1 or
+           s.target_alive_read ~= 1 or s.target_alive ~= 1 or
+           s.target_turn_tasks_read ~= 1 or s.owner_matches ~= 1 then return nil; end
+        local sizes = {s.target_turn_tasks_a_size, s.target_turn_tasks_b_size, s.target_turn_tasks_c_size};
+        local caps = {s.target_turn_tasks_a_capacity, s.target_turn_tasks_b_capacity, s.target_turn_tasks_c_capacity};
+        for i = 1, 3 do
+            if type(sizes[i]) ~= "number" or type(caps[i]) ~= "number" or
+               sizes[i] < 0 or sizes[i] % 1 ~= 0 or caps[i] % 1 ~= 0 or
+               sizes[i] > caps[i] or caps[i] > 256 then return nil; end
+        end
+        return sizes;
+    end
+    local sizes = readState();
+    if sizes == nil then return false; end
+    local function complete(s)
+        return s and s[1] == 15 and s[2] == 6 and s[3] == 3;
+    end
+    if complete(sizes) then return true; end
+    local key = "CSF_TurnTasksAttempted_" .. tostring(iCs);
+    if sizes[1] ~= 0 or sizes[2] ~= 0 or sizes[3] ~= 0 or Game:GetProperty(key) then return false; end
+    Game:SetProperty(key, true);
+    pcall(C6FW.InitializeCityStateTurnTasks, iCs);
+    return complete(readState()) == true;
+end
+
+local function CSF_RestoreCityStateDefense()
+    for i = 0, 61 do
+        local record = Game:GetProperty("CSF_Founding_" .. tostring(i));
+        if type(record) == "table" then
+            local city = Cities.GetCityInPlot(record.X, record.Y);
+            if city and city:GetOwner() == i then
+                local nameOk, named = pcall(CSF_EnsureIdentityText, i);
+                if not nameOk or not named then print("[CSF] identity text restore unconfirmed slot=" .. tostring(i)); end
+                local ok, result = pcall(CSF_EnsureCityStateDefense, i, city);
+                if not ok or not result then print("[CSF] defense restore unconfirmed slot=" .. tostring(i)); end
+                local abilityOk, abilities = pcall(CSF_EnsureCityStateAbilities, i);
+                if not abilityOk or not abilities then print("[CSF] abilities restore unconfirmed slot=" .. tostring(i)); end
+                local tasksOk, tasks = pcall(CSF_EnsureCityStateTurnTasks, i);
+                if not tasksOk or not tasks then print("[CSF] AI turn tasks restore unconfirmed slot=" .. tostring(i)); end
+                local api = ExposedMembers and ExposedMembers.CSF;
+                if api and api.ApplyCityStateColor then
+                    local colorOk, applied = pcall(api.ApplyCityStateColor, i,
+                        PlayerConfigurations[i]:GetCivilizationTypeName());
+                    if not colorOk or not applied then print("[CSF] color restore unconfirmed slot=" .. tostring(i)); end
+                end
+            end
+        end
+    end
+end
+
+local function CSF_CompleteFounding(iCs, iOwner)
+    local sKey = "CSF_Founding_" .. tostring(iCs);
+    local kState = Game:GetProperty(sKey);
+    if type(kState) ~= "table" or kState.Owner ~= iOwner then
+        return false, "founding_record_missing";
+    end
+    local pOwner, pCs = Players[iOwner], Players[iCs];
+    local pCity = Cities.GetCityInPlot(kState.X, kState.Y);
+    if pOwner == nil or pCs == nil or pCity == nil or pCity:GetOwner() ~= iCs then
+        return false, "founding_city_missing";
+    end
+    if not CSF_EnsureCityStateDefense(iCs, pCity) then
+        return false, "founding_defense_unconfirmed";
+    end
+    if not CSF_EnsureIdentityText(iCs) then return false, "founding_identity_text_unconfirmed"; end
+    if not CSF_EnsureCityStateAbilities(iCs) then return false, "founding_abilities_unconfirmed"; end
+    if not CSF_EnsureCityStateTurnTasks(iCs) then return false, "founding_ai_tasks_unconfirmed"; end
+    local pDiplo, pCsDiplo = pOwner:GetDiplomacy(), pCs:GetDiplomacy();
+    local pInfluence, pCsInfluence = pOwner:GetInfluence(), pCs:GetInfluence();
+    if pDiplo == nil or pCsDiplo == nil or pInfluence == nil or pCsInfluence == nil or
+       pCsInfluence:CanReceiveInfluence() ~= true then
+        return false, "founding_systems_missing";
+    end
+    if not pDiplo:HasMet(iCs) then
+        pcall(function() pDiplo:SetHasMet(iCs); end);
+    end
+    if not pCsDiplo:HasMet(iOwner) then
+        pcall(function() pCsDiplo:SetHasMet(iOwner); end);
+    end
+    if not pDiplo:HasMet(iCs) or not pCsDiplo:HasMet(iOwner) then
+        return false, "founding_contact_failed";
+    end
+    -- Done records a verified historical reward. War, espionage and other
+    -- normal gameplay can later remove envoys; neither regrant them nor turn
+    -- a completed founding into a failed transaction on the next reload.
+    if kState.Done then return true,"ok"; end
+
+    -- 先完成官方首次接触，再额外奖励 1 个使者；首次接触奖励由引擎决定。
+    -- 调用前持久化目标和 attempted；调用结果未知时只读回，绝不盲目重发。
+    local iReceived = pCsInfluence:GetTokensReceived(iOwner);
+    if type(iReceived) ~= "number" then return false, "founding_envoy_unreadable"; end
+    -- A legacy/incomplete transaction may retain its target but lose the
+    -- stock baseline. Never grant first and only then discover that the
+    -- historical transaction cannot be verified. Done records returned above.
+    local function validRewardCount(value)
+        return type(value) == "number" and value >= 0 and value < 2147483648
+           and value == math.floor(value);
+    end
+    if kState.RewardTarget ~= nil then
+        if not validRewardCount(kState.RewardTarget) or
+           not validRewardCount(kState.StockBefore) then
+            return false, "founding_legacy_record_unconfirmed";
+        end
+    elseif kState.RewardAttempted then
+        return false, "founding_legacy_record_unconfirmed";
+    end
+    if kState.RewardTarget == nil then
+        local stock = pInfluence:GetTokensToGive();
+        if not validRewardCount(stock) or not validRewardCount(iReceived) or
+           iReceived >= 2147483647 then return false, "founding_envoy_unreadable"; end
+        kState.RewardTarget = iReceived + 1;
+        kState.StockBefore = stock;
+        Game:SetProperty(sKey, kState);
+    end
+    if not kState.RewardAttempted then
+        kState.RewardAttempted = true;
+        Game:SetProperty(sKey, kState);
+        pcall(function() pInfluence:GiveFreeTokenToPlayer(iCs); end);
+    end
+    iReceived = pCsInfluence:GetTokensReceived(iOwner);
+    if type(iReceived) ~= "number" or iReceived < kState.RewardTarget then
+        return false, "founding_envoy_unconfirmed";
+    end
+    if not kState.Done and pInfluence:GetTokensToGive() ~= kState.StockBefore then
+        return false, "founding_envoy_spent_stock";
+    end
+    if not kState.Done then
+        kState.Done = true;
+        Game:SetProperty(sKey, kState);
+    end
+    return true, "ok";
+end
+
 local m_tPending = {};      -- 待处理的建邦请求队列
 local m_kLastResult = nil;  -- 最后一次执行结果（供 UI 轮询兜底读取）
+local m_tLastResultByOwner = {};
 local m_iResultSeq  = 0;    -- 结果序号（UI 用来判断"有没有新结果"）
+local m_iRequestSeq = 0;    -- 同一 Gameplay 实例内的请求关联号
+local m_bProcessing = false; -- ★ 正在处理队列中？—— 阻止同队列重入
 
-local function CSF_RequestFound(sCiv, iX, iY, iUnitID, iOwnerID)
-    if sCiv == nil or iX == nil or iY == nil then
-        return false;
+local function CSF_IsInteger(value)
+    return type(value) == "number" and value == math.floor(value) and value > -2147483648 and value < 2147483648;
+end
+
+local function CSF_ValidateEnvoyRequest(sCiv, iX, iY, iUnitID, iOwnerID)
+    if type(sCiv) ~= "string" or not CSF_IsInteger(iX) or not CSF_IsInteger(iY) or
+       not CSF_IsInteger(iUnitID) or not CSF_IsInteger(iOwnerID) or iOwnerID < 0 or iOwnerID >= 62 then
+        return false, "request_invalid";
     end
+    local owner, cfg = Players[iOwnerID], PlayerConfigurations[iOwnerID];
+    if owner == nil or not owner:IsAlive() or cfg == nil or
+       cfg:GetCivilizationLevelTypeName() ~= "CIVILIZATION_LEVEL_FULL_CIV" then
+        return false, "request_owner_invalid";
+    end
+    local row = GameInfo.Civilizations[sCiv];
+    if row == nil or row.StartingCivilizationLevelType ~= "CIVILIZATION_LEVEL_CITY_STATE" then
+        return false, "request_civilization_invalid";
+    end
+    local unit = UnitManager.GetUnit(iOwnerID, iUnitID);
+    if unit == nil then return false, "request_unit_missing"; end
+    local unitRow = GameInfo.Units[unit:GetType()];
+    if unit:GetOwner() ~= iOwnerID or unitRow == nil or unitRow.UnitType ~= "UNIT_CSF_ENVOY" then
+        return false, "request_unit_invalid";
+    end
+    if unit:GetX() ~= iX or unit:GetY() ~= iY then return false, "request_unit_moved"; end
+    return true;
+end
+
+local function CSF_PublishResult(kReq, bOk, sReason, iCs, bCityCreated)
+    m_iResultSeq = m_iResultSeq + 1;
+    m_kLastResult = {Seq=m_iResultSeq, Ok=bOk == true, Reason=tostring(sReason), Player=iCs or -1,
+        X=kReq.X, Y=kReq.Y, RequestID=kReq.RequestID, OwnerID=kReq.OwnerID, CityCreated=bCityCreated == true};
+    m_tLastResultByOwner[kReq.OwnerID] = m_kLastResult;
+    if kReq.Synced then
+        Game:SetProperty("CSF_LastResult_" .. tostring(kReq.OwnerID), m_kLastResult);
+        local pending = Game:GetProperty("CSF_SyncPending_" .. tostring(kReq.OwnerID));
+        if type(pending) == "table" and pending.RequestID == kReq.RequestID then
+            Game:SetProperty("CSF_SyncPending_" .. tostring(kReq.OwnerID), nil);
+        end
+    end
+    pcall(function()
+        GameEvents.CSF_FoundResult(bOk == true, tostring(sReason), iCs or -1,
+            kReq.X, kReq.Y, kReq.RequestID, kReq.OwnerID);
+    end);
+end
+
+local function CSF_RequestFound(sCiv, iX, iY, iUnitID, iOwnerID, iRequestID, bSynced)
+    local valid, reason = CSF_ValidateEnvoyRequest(sCiv, iX, iY, iUnitID, iOwnerID);
+    if not valid then return false, reason; end
+    if iRequestID ~= nil then
+        for _, pending in ipairs(m_tPending) do
+            if pending.OwnerID == iOwnerID and pending.RequestID == iRequestID then return true, iRequestID; end
+        end
+    end
+    m_iRequestSeq = math.max(m_iRequestSeq + 1, iRequestID or 0);
     m_tPending[#m_tPending + 1] = {
         Civ = sCiv, X = iX, Y = iY, UnitID = iUnitID, OwnerID = iOwnerID,
+        RequestID = iRequestID or m_iRequestSeq, Synced = bSynced == true,
     };
     print("[CSF] queued found request: " .. tostring(sCiv) .. " at (" ..
           tostring(iX) .. "," .. tostring(iY) .. ") unit=" .. tostring(iUnitID) ..
           " owner=" .. tostring(iOwnerID));
-    return true;
+    return true, iRequestID or m_iRequestSeq;
 end
 
 -- 处理队列（在游戏事件里跑，**不在 UI 回调栈内**）
+--
+--   ★ 2026-10-15【阻止同队列重入】：本函数自己会调 `Cities:Create`，而建城会
+--     触发新的游戏事件 → `GameCoreEventPublishComplete` 可能在本函数【还没跑完】
+--     时再次进来。此时本轮请求尚未成功、限流器（只有成功才记账）还没拦住，
+--     重入就能在【同一个回合】再建一个城邦 —— 与引擎"一回合一个"的限制冲突。
+--     用显式标志挡住；正常退出/异常退出都会复位（每个请求都各自 pcall）。
 local function CSF_ProcessPending()
+    if m_bProcessing then
+        print("[CSF] 队列正在处理中 → 忽略这次重入（同一个回合只能建一个城邦）");
+        return;
+    end
     if #m_tPending == 0 then return end
+
+    m_bProcessing = true;
+
     local tBatch = m_tPending;
     m_tPending = {};
 
@@ -2671,39 +3554,102 @@ local function CSF_ProcessPending()
               " at (" .. tostring(kReq.X) .. "," .. tostring(kReq.Y) .. ")");
         local bOk, sReason, iCs, bFull = false, "not_run", nil, false;
         local okCall = pcall(function()
+            local valid, reason = CSF_ValidateEnvoyRequest(kReq.Civ,kReq.X,kReq.Y,kReq.UnitID,kReq.OwnerID);
+            if not valid then sReason = reason; return; end
             bOk, sReason, iCs, bFull =
                 CSF_FoundCityStateByCiv(kReq.Civ, kReq.X, kReq.Y, kReq.UnitID, kReq.OwnerID);
         end);
         if not okCall then
+            bOk = false;
             sReason = "threw";
             print("[CSF] ERROR: 建邦调用抛异常（已捕获，未崩游戏）");
+        end
+        local bCityCreated = bOk == true;
+        if bCityCreated then
+            local bCompleted, bContactOk, sContactReason = pcall(function()
+                local sKey = "CSF_Founding_" .. tostring(iCs);
+                -- 建城器可能因腾格而调整落点；只在它已独立确认成功后，
+                -- 从目标城邦唯一的实际城市取坐标，不能把旧请求坐标写进恢复记录。
+                local pCities = Players[iCs]:GetCities();
+                assert(pCities:GetCount() == 1, "founding city is ambiguous");
+                local iActualX, iActualY;
+                for _, pCity in pCities:Members() do
+                    assert(pCity:GetOwner() == iCs, "founding owner mismatch");
+                    iActualX, iActualY = pCity:GetX(), pCity:GetY();
+                end
+                assert(iActualX ~= nil and iActualY ~= nil, "founding city missing");
+                kReq.X, kReq.Y = iActualX, iActualY;
+                Game:SetProperty(sKey, {Owner = kReq.OwnerID, X = iActualX, Y = iActualY,
+                    RequestID=kReq.Synced and kReq.RequestID or nil});
+                return CSF_CompleteFounding(iCs, kReq.OwnerID);
+            end);
+            bOk = bCompleted and bContactOk == true;
+            sReason = bCompleted and sContactReason or "founding_finalize_threw";
         end
         print("[CSF] queued request result: ok=" .. tostring(bOk) ..
               " reason=" .. tostring(sReason) .. " player=" .. tostring(iCs));
         -- 存下最后结果（UI 轮询兜底用；因为某些 UI 上下文里 GameEvents 为 nil）
-        m_iResultSeq = m_iResultSeq + 1;
-        m_kLastResult = {
-            Seq = m_iResultSeq,
-            Ok = (bOk == true),
-            Reason = tostring(sReason),
-            Player = iCs or -1,
-            X = kReq.X, Y = kReq.Y,
-        };
-        -- 广播回 UI（GameEvents 跨 VM；拿不到就靠上面的轮询兜底）
-        pcall(function()
-            GameEvents.CSF_FoundResult(bOk == true, tostring(sReason),
-                                       iCs or -1, kReq.X, kReq.Y);
-        end);
+        CSF_PublishResult(kReq,bOk,sReason,iCs,bCityCreated);
     end
+
+    m_bProcessing = false;
 end
 
--- 取最后一次结果（UI 轮询用）。返回 (seq, ok, reason, player, x, y)
-local function CSF_GetLastResult()
-    if m_kLastResult == nil then
+-- 前六个返回值保持兼容；末尾追加请求号和发起玩家，供 UI 精确关联。
+local function CSF_GetLastResult(iOwner)
+    local result = m_kLastResult;
+    if iOwner ~= nil then
+        result = m_tLastResultByOwner[iOwner] or Game:GetProperty("CSF_LastResult_" .. tostring(iOwner));
+    end
+    if result == nil then
         return 0, false, "none", -1, -1, -1;
     end
-    return m_kLastResult.Seq, m_kLastResult.Ok, m_kLastResult.Reason,
-           m_kLastResult.Player, m_kLastResult.X, m_kLastResult.Y;
+    return result.Seq, result.Ok, result.Reason, result.Player, result.X, result.Y,
+           result.RequestID, result.OwnerID;
+end
+
+-- UI sends an engine operation; actor comes from the native operation callback,
+-- never from a claimed OwnerID in the payload. ExposedMembers is not the bus.
+GameEvents.CSF_FoundRequest.Add(function(actor, params)
+    if not CSF_IsInteger(actor) or actor < 0 or actor >= 62 or type(params) ~= "table" or
+       not CSF_IsInteger(params.CSF_RequestID) or params.CSF_RequestID <= 0 then return; end
+    local seqKey = "CSF_SyncSequence_" .. tostring(actor);
+    local previous = Game:GetProperty(seqKey) or 0;
+    if params.CSF_RequestID <= previous then return; end -- persisted replay guard
+    Game:SetProperty(seqKey,params.CSF_RequestID);
+    local req={Civ=params.CSF_Civ,X=params.CSF_X,Y=params.CSF_Y,UnitID=params.CSF_UnitID,
+        OwnerID=actor,RequestID=params.CSF_RequestID,Synced=true};
+    local queued, reason=CSF_RequestFound(req.Civ,req.X,req.Y,req.UnitID,actor,req.RequestID,true);
+    if queued then Game:SetProperty("CSF_SyncPending_" .. tostring(actor),req);
+    else CSF_PublishResult(req,false,reason,nil,false); end
+end);
+
+local function CSF_RestorePendingRequests()
+    for actor=0,61 do
+        local req=Game:GetProperty("CSF_SyncPending_" .. tostring(actor));
+        if type(req)=="table" and req.Synced==true and req.OwnerID==actor and
+           req.RequestID==Game:GetProperty("CSF_SyncSequence_" .. tostring(actor)) then
+            local previous=Game:GetProperty("CSF_LastResult_" .. tostring(actor));
+            local recovered=false;
+            if type(previous)=="table" and previous.RequestID==req.RequestID then
+                Game:SetProperty("CSF_SyncPending_" .. tostring(actor),nil);
+                recovered=true;
+            else
+                for slot=0,61 do
+                    local record=Game:GetProperty("CSF_Founding_" .. tostring(slot));
+                    if type(record)=="table" and record.Owner==actor and record.RequestID==req.RequestID then
+                        local ok,reason=CSF_CompleteFounding(slot,actor);
+                        CSF_PublishResult(req,ok,reason,slot,true);
+                        recovered=true;break;
+                    end
+                end
+            end
+            if not recovered then
+                local queued,reason=CSF_RequestFound(req.Civ,req.X,req.Y,req.UnitID,actor,req.RequestID,true);
+                if not queued then CSF_PublishResult(req,false,reason,nil,false); end
+            end
+        end
+    end
 end
 
 Events.GameCoreEventPublishComplete.Add(function()
@@ -2732,8 +3678,74 @@ ExposedMembers.CSF.FoundCityStateByCiv    = CSF_FoundCityStateByCiv;
 ExposedMembers.CSF.GetLeaderForCiv        = CSF_GetLeaderForCiv;
 -- 【延迟执行】UI 用这个下单
 ExposedMembers.CSF.RequestFound           = CSF_RequestFound;
+-- RequestFound remains a local diagnostic hook. Production UI uses only the
+-- native CSF_FoundRequest operation; do not use this hook as a network bus.
+ExposedMembers.CSF.RestorePendingRequests = CSF_RestorePendingRequests;
 -- 【结果轮询兜底】某些 UI 上下文里 GameEvents 为 nil，UI 可改用它主动拉结果
 ExposedMembers.CSF.GetLastResult          = CSF_GetLastResult;
+-- 仅恢复已有的、归属吻合的建邦记录，不创建城市，也不重复发奖励。
+ExposedMembers.CSF.CompleteFounding        = CSF_CompleteFounding;
+ExposedMembers.CSF.RestoreCityStateDefense = CSF_RestoreCityStateDefense;
+-- Read-only authority for UI configuration mirrors. Never infer a founded
+-- identity from the request alone: require a persisted record and real city.
+ExposedMembers.CSF.GetFoundedIdentities = function()
+    local out = {};
+    for i = 0, 61 do
+        local record = Game:GetProperty("CSF_Founding_" .. tostring(i));
+        if type(record) == "table" then
+            local city = Cities.GetCityInPlot(record.X, record.Y);
+            local cfg = PlayerConfigurations[i];
+            if city and city:GetOwner() == i and cfg and
+               cfg:GetCivilizationLevelTypeName() == "CIVILIZATION_LEVEL_CITY_STATE" then
+                local text = CSF_IdentityTexts(i) or {};
+                out[#out + 1] = {PlayerID=i, Civ=cfg:GetCivilizationTypeName(), Leader=cfg:GetLeaderTypeName(),
+                    ShortName=text.ShortName, Description=text.Description, Adjective=text.Adjective,
+                    Color=CSF_Safe(function() return C6FW.GetPlayerColorBySlot(i) end)};
+            end
+        end
+    end
+    return out;
+end;
+
+-- A failed, already-published native player cannot safely be rolled back.
+-- Mirror its real identity too so official UI enumeration can format names
+-- without crashing. This does not classify it as founded, grant abilities,
+-- publish alive state, restore rewards, or make the isolated slot reusable.
+ExposedMembers.CSF.GetPublishedIdentities = function()
+    local out=ExposedMembers.CSF.GetFoundedIdentities();
+    local seen={};for _,row in ipairs(out)do seen[row.PlayerID]=true;end
+    for i=0,61 do
+        if not seen[i] and Game:GetProperty("CSF_IsolatedSlot_" .. tostring(i)) ~= nil then
+            local p,cfg=Players[i],PlayerConfigurations[i];
+            local ok,live=pcall(function()return p and p:IsAlive() and C6FW.HasGamePlayer(i)==1;end);
+            if ok and live and cfg then
+                local civ,leader=cfg:GetCivilizationTypeName(),cfg:GetLeaderTypeName();
+                local proven=cfg:GetCivilizationLevelTypeName()=="CIVILIZATION_LEVEL_CITY_STATE";
+                if not proven or civ==nil or leader==nil then
+                    -- Older saves omitted the orphan's frontend configuration.
+                    -- Require persisted creation provenance AND the live native
+                    -- six-table city-state classification, not a requested name.
+                    local identity=Game:GetProperty("CSF_IsolatedIdentity_" .. tostring(i));
+                    civ=type(identity)=="table" and identity.Civ or Game:GetProperty("CSF_CopyOf_" .. tostring(i));
+                    leader=type(identity)=="table" and identity.Leader or (civ and CSF_GetLeaderForCiv(civ));
+                    local snap=CSF_Safe(function()return C6FW.GetPlayerSnapshot(i)end);
+                    proven=type(snap)=="table" and snap.read_status==0 and snap.target_alive==1 and
+                        snap.target_initialized==1 and snap.global_list_state==5 and snap.city_state_list_state==5 and
+                        snap.global_target_pointer_hits==2 and snap.global_target_slot_hits==3 and
+                        snap.city_state_target_pointer_hits==2 and snap.city_state_target_slot_hits==3;
+                end
+                local row=civ and GameInfo.Civilizations[civ];
+                if proven and row and row.StartingCivilizationLevelType=="CIVILIZATION_LEVEL_CITY_STATE" and
+                   leader and GameInfo.Leaders[leader] then
+                    out[#out+1]={PlayerID=i,Civ=civ,Leader=leader,
+                        ShortName=row.Name,Description=row.Description,Adjective=row.Adjective,
+                        Color=CSF_Safe(function()return C6FW.GetPlayerColorBySlot(i)end),Isolated=true};
+                end
+            end
+        end
+    end
+    return out;
+end;
 
 print("[CSF] CSF_Gameplay.lua ready; ExposedMembers.CSF bound" ..
       " (max envoys per player = " .. tostring(CSF_MAX_ENVOYS_PER_PLAYER) .. ")");

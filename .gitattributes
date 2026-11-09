@@ -1,0 +1,5 @@
+# Packaging and the shared ABI pin use the exact bytes of these inputs.
+src/** -text
+LICENSE -text
+docs/SHARED_LOADER_NOTICES.txt -text
+native/vendor/HookAPI.h -text whitespace=cr-at-eol,-blank-at-eof
