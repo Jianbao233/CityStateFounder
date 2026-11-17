@@ -1,0 +1,73 @@
+{
+  "version": "1.1.2",
+  "mod_version": 112,
+  "source_tag": "v1.1.2",
+  "source_commit": "60730b37b549c1a11bcc6b80720ac61bdabe1a66",
+  "game": {
+    "steam_app_id": 289070,
+    "platform": "Windows",
+    "ruleset": "Gathering Storm",
+    "tested_steam_build": 26407122
+  },
+  "loader": {
+    "version": "1.0.6",
+    "entry": "WINMM",
+    "format": 2,
+    "ccb_toolkit_baseline": "2.0.40-beta"
+  },
+  "workshop": {
+    "item_id": 3808178854,
+    "visibility": "public",
+    "published_at": "2026-11-17T09:33:05+08:00",
+    "content_manifest_id": "6704241098364686379",
+    "titles": {
+      "english": "City-State Founder v1.1.2",
+      "schinese": "城邦缔造者 v1.1.2"
+    }
+  },
+  "payload": {
+    "files": 30,
+    "bytes": 8137754,
+    "archive": "CityStateFounder_v1.1.2_workshop_20261117.zip",
+    "archive_sha256": "bd82b2004671fdba6ac33d273c723e9d3c76adeb1f37af9ec3bed6099c2dcf04",
+    "files_sha256": {
+      "BUILD_MANIFEST.json": "bb4eeb1ec449651e78c291c02e5fe60194253f2677e999f7751aec53e4d61e24",
+      "CityStateFounder.modinfo": "ae5bdc00e6afb6a32c4ad943e23517ca34b9af3d981b7155f1a2dd926381f7e1",
+      "LICENSE.txt": "affc4a1e30f36e86f7ec131818cf2c74c269b218d56da43735a38743b9c00a1e",
+      "README_TEST.zh-CN.md": "36d583a139c9ebc1c9cece28fee9e16437799f62a6570bdd3b7c2c6fb3c8067f",
+      "THIRD_PARTY_NOTICES.txt": "6f18a8b552aee43bc5c9107bdf40cbe7cf334fa4f0a893d877e7e160a3f20e21",
+      "Config/CSF_GameCores.sql": "da3ffb28267ad507b5d63bbfa1edf51600b5ebd764aa0817b5d2a190df9d1bd6",
+      "Data/CSF_CityStateColors.sql": "87fe4349fe22669c65ad038f5d8110db88e4d206ced9ff4b78286a65faa48591",
+      "Data/CSF_CityStateConfig.xml": "7f519127ea7124f5c941d8f40df74660d72e64847c9436a1129a7b39d799965c",
+      "Data/CSF_CityStateCountRange.xml": "7994adbc7ea0517376716e02a623e366cfdc2778395dc884d448f15a2ec04453",
+      "Data/CSF_CityStatePicker.sql": "e301b9eb290f3771849b53fefeca70d006282acf9c51ecd3b126c2da1fdfb733",
+      "Data/CSF_CustomCityStates.sql": "ed482e336107226f6b614c5085a6888a54a6063398b9810ac2aa25831fc4c1a1",
+      "Data/CSF_Icons.xml": "70faf877d98ca7b3feaa5bdf71a8295e77b0e6ac3847bcf2ea316cf84512dfdc",
+      "Data/CSF_MapSizes.sql": "2df6b6aaca5beec583d730aba2979f9611fe5804945e8fd9741e3b06182af46a",
+      "Data/CSF_MapSizes.xml": "d192e826e5a492d061216c7783fa325f6da758c4b477bd5ef197daf53990d6fb",
+      "Data/CSF_Units.sql": "23cf30fafb559fe59f9f0a8085eaa162d662b2c4994912a2be16af8dfddc6c0f",
+      "Lua/CSF_CreateCityState.lua": "7927ac7a2cdeeac3a65b767b03f0131db9a8f82f8329aa642eb7592164e122f9",
+      "Lua/CSF_Gameplay.lua": "6e67fcbc61b8945e8ae618a2cc74859594f32f21d51f5849c78b8161753e9ded",
+      "Text/CSF_CustomCityStates_Text.xml": "56d6edacb52d97865ff45aad80effcb153ab380daa863c3211e20ec62cac9473",
+      "Text/CSF_Text.xml": "db6c554979ee62dc5a846bb12b7a2d2d3cb7f0a8b84ef1db0aba4ed923935769",
+      "UI/CSF_CityBannerPatch.lua": "abf9a8ec260ad9aae6aca8639953a275dac92ffa80a773119dd60ecf7cff1960",
+      "UI/CSF_CityStatesPatch.lua": "1296d5599aaa15cf4ceb14b079471dc00fa2e8197c21d9d1b62cee74c1d4bc0c",
+      "UI/CSF_CopyRegistry.lua": "0441bd5560d9b4ca7d489f1e7bae7bf4be1c0563f036493a34def1c7853ce520",
+      "UI/CSF_Panel.lua": "125c77ab858a6effa3a501372ece314cc3e53c1df38c2a0eb08887f785807c18",
+      "UI/CSF_Panel.xml": "d4a435e2f1b3e8a2d3a8b8b223f70ba95e8149f9832706b5444d8dc21a0812da",
+      "UI/CSF_UICommon.lua": "7406e8d24a796b4abebb90aec5407a326e4d5d4bf4e45acf8bd20593006c2deb",
+      "UI/CSF_UnitFlagManager.lua": "a8a424127e22332e4053d24712f342e7ca46eef1392d20b71644aa69692dce5e",
+      "UI/CSF_UnitPanel.lua": "28e4bf7fbf8ddbc4d96bcd3d557bf1bcbe625c82b76f376cf43d757f1adc8d53",
+      "Binaries/Win64/Civ6DllLoader.winmm.runtime.dll": "1d26e90118d8f7faec0a7f5dfbf1d2696809a8095093b2ccaca2d07ba75b44e7",
+      "Binaries/Win64/GameCore_XP2_Shell_FinalRelease.dll": "e207bc3070f14b8bc26fb04df4a2eda9803e6525b8ce5bff2373a65eb6384acc",
+      "Binaries/Win64/Plugins/GameCore/CityStateFounder.dll": "bae696aaff76f67f04c63906ffca0bd87d55fe211ce61e24c02e6327cc0310dc"
+    }
+  },
+  "verification": {
+    "published_titles_and_full_descriptions": "verified_english_and_schinese",
+    "steam_subscription_file_hashes": "verified_all_30",
+    "gameplay": "User confirmed v1.1.2 on Steam build 26407122. Logs recorded native plugin initialization and successful Muscat duplicate founding. The public package carries the same runtime files.",
+    "independent_multiplayer": "not_verified",
+    "cold_restart_save_reload_for_112": "not_separately_verified"
+  }
+}
